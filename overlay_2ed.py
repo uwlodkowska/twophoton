@@ -6,11 +6,6 @@ import csv, math
 from collections import OrderedDict
 
 intersession_codes = {
-	'1' : {
-		'21' : 'b1b2',
-		'32' : 'a1b2',
-		'32' : 'ab_consec',
-	},
 	'other' : {
 		'21' : 'ab_consec',
 		'31' : 'a1b2',
@@ -22,9 +17,21 @@ intersession_codes = {
 }
 
 shift = {
+    'm2_r1s31' : [2,18,0],
+    'm2_r1s32' : [-10,28,0],
+    'm2_r1s21' : [13, -10,0],
     'm3_r1s31' : [19,-9,0],
     'm3_r1s32' : [12,4,0],
     'm3_r1s21' : [7,-13,0],
+    'm12_r1s31' : [7,10,0],
+    'm12_r1s32' : [7,12,0],
+    'm12_r1s21' : [0,-2,0],
+    'm9_r2s31' : [10, 19, 0],
+    'm9_r2s32' : [8,3, 0],
+    'm9_r2s21' : [2, 16, 0],
+    'm8_r1s31' : [0, 50, 0],
+    'm8_r1s32' : [7,13, 0],
+    'm8_r1s21' : [-7,37, 0],
 }
 
 shift_key_root = 'm{}s{}{}'
@@ -46,6 +53,7 @@ directory = "/mnt/ula/twophoton/2p_fosgfp2020/processing/"
 mouse = 2
 sole_ctx_session = 1
 rep_ctx_sessions = [2,3]
+
 img_source_file = "m{}s{}{}_tst_sa.tif"
 source_file = "result_label_m{}s{}{}.csv"
 overlap_file = "overlap_m{}{}s{}.csv"
@@ -152,49 +160,31 @@ def draw_histogram_with_thre(title, array, threshold):
 	plt.drawDottedLine(threshold, plt_limits[-2], threshold, len(array), 5)
 	plt.show()
 
-def create_roi_group(x, y, z, img, idx, ov_idxs):
+def create_roi_group(x, y, z, img):
 	roi_group = []
 	mean = 0
-	stdev = 0
-	if ov_idxs is not None:
+	for i in range(-2,3):
+		diameter = roi_diameter[abs(i)]
+		rad = diameter/2
+		img.setSlice(z+i)
+		roi = OvalRoi(x-rad, y-rad, diameter, diameter)
+		'''
 		if idx in overlap_idxs:
 			roi.setStrokeColor(green)
-			for i in range(-2,3):
-				diameter = roi_diameter[abs(i)]
-				#TODO delete
-				diameter = roi_diameter[abs(0)]
-				rad = diameter/2
-				img.setSlice(z+i)
-				roi = OvalRoi(x-rad, y-rad, diameter, diameter)
-				
-				roi.setPosition(z+i)
-				img.setRoi(roi)
-				stats = roi.getStatistics()
-				mean += stats.mean * pow(rad,2)
-				if i == 0:
-					stdev = stats.stdDev
-				roi_group.append(roi)
-			mean /= area_scale_factor
-	else:
-		for i in range(-2,3):
-			diameter = roi_diameter[abs(i)]
-			#TODO delete
-			diameter = roi_diameter[abs(0)]
-			rad = diameter/2
-			img.setSlice(z+i)
-			roi = OvalRoi(x-rad, y-rad, diameter, diameter)
-			
-			roi.setPosition(z+i)
-			img.setRoi(roi)
-			stats = roi.getStatistics()
-			mean += stats.mean * pow(rad,2)
-			if i == 0:
-				stdev = stats.stdDev
-			roi_group.append(roi)
-		mean /= area_scale_factor
+		else:
+			roi.setStrokeColor(red)
+		'''
+		roi.setPosition(z+i)
+		img.setRoi(roi)
+		stats = roi.getStatistics()
+		mean += stats.mean * pow(rad,2)
+		if i == 0:
+			stdev = stats.stdDev
+		roi_group.append(roi)
+	mean /= area_scale_factor
 	return roi_group, mean, stdev
 
-def prepare_roi_stats_dict(mouse_no, session_no, img, region="", ov_idxs=None):
+def prepare_roi_stats_dict(mouse_no, session_no, img, region=""):
 	cells_file = directory + source_file.format(mouse_no, session_no, region)
 	
 	roi_dict = {
@@ -205,24 +195,20 @@ def prepare_roi_stats_dict(mouse_no, session_no, img, region="", ov_idxs=None):
 	
 	with open(cells_file,"r") as source:
 	    rdr = csv.DictReader( source )
-	    idx = 0
 	    for r in rdr:
-	    	pos = int(float(r['Z']))
-	    	idx += 1
-	    	if (pos >5 and pos <75):
-		    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), 
-		    	int(float(r['Y'])), int(float(r['Z'])), img, idx, ov_idxs)
-		    	roi_dict['means'].append(mean)
-		    	roi_dict['stdev'].append(stdev)
-		    	roi_dict['rois'].append(roi_group)   
+	    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), 
+	    	int(float(r['Y'])), int(float(r['Z'])), img)
+	    	roi_dict['means'].append(mean)
+	    	roi_dict['stdev'].append(stdev)
+	    	roi_dict['rois'].append(roi_group)
 	return roi_dict
 
-def selection_by_thresholding(mouse_no, session_no, region="", ov_idxs = None):
+def selection_by_thresholding(mouse_no, session_no, region=""):
 	img_path = directory + img_source_file.format(mouse_no, session_no, region)
 	result_file_path = directory + result_file.format(mouse_no, session_no, region)
 	
 	imp = ImagePlus(img_path)
-	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, region, ov_idxs)
+	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, region)
 	mean_threshold = otsu_thre(roi_dict['means'])
 
 	cell_list = []
@@ -231,7 +217,7 @@ def selection_by_thresholding(mouse_no, session_no, region="", ov_idxs = None):
 		wtr = csv.writer( result )
 		wtr.writerow( field_names_coords )
 		for idx, roi in enumerate(roi_dict['rois']):
-			if(roi_dict['means'][idx] > mean_threshold/3):
+			if(roi_dict['means'][idx] > mean_threshold):
 				vals = []
 				for c in roi[2].getContourCentroid():
 					vals.append(int(c))
@@ -243,11 +229,11 @@ def selection_by_thresholding(mouse_no, session_no, region="", ov_idxs = None):
 					overlay.add(roi_p)
 	imp.setOverlay(overlay)
 
-	
+	'''
 	imp.show()
 	draw_histogram_with_thre('srednia intensywnosc w obrebie roi', roi_dict['means'], mean_threshold)
-	
-	print(len(cell_list))
+	'''
+	print("all cells for mouse " + mouse_no + ", session " + session_no + ": ", len(cell_list))
 	return cell_list
 
 def find_overlap(cell_list1, cell_list2, shift):
@@ -359,7 +345,7 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 			overlap_dict[ov_code].append(format(float(len_intersection)/(len(cells1)+len(cells2)-len_intersection),'.2f'))
 
 	all_cells_count += threeway_overlap
-	print(threeway_overlap)
+	print("no of always active: " + str(threeway_overlap))
 	for i in range(3):
 		cells = cells_dict[str(starting_session+i)]
 		tst = [k for k in range(len(cells))]
@@ -391,16 +377,15 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	for key in overlap_dict.keys():
 		overlap_dict[key].append(format(float(overlap_dict[key][0])/all_cells_count,'.2f'))
 	
-	print(all_cells_count)
+	print("all cells count ", all_cells_count)
 
 	overlap_dict = OrderedDict(sorted(overlap_dict.items(), key=lambda t: t[0]))
 
 	save_dict(overlap_dict, first)
-	
-	_, o12_idx1, o12_idx2 = find_overlap(cells_dict["1"], cells_dict["2"], shift[shift_code_root+"21"])
-	_, o13_idx1, o13_idx3 = find_overlap(cells_dict["1"], cells_dict["3"], shift[shift_code_root+"31"])
-	_, o23_idx2, o23_idx3 = find_overlap(cells_dict["2"], cells_dict["3"], shift[shift_code_root+"32"])
 	'''
+	_, o12_idx1, o12_idx2 = find_overlap(cells_dict["4"], cells_dict["5"], shift[shift_code_root+"54"])
+	_, o13_idx1, o13_idx3 = find_overlap(cells_dict["4"], cells_dict["6"], shift[shift_code_root+"64"])
+	_, o23_idx2, o23_idx3 = find_overlap(cells_dict["5"], cells_dict["6"], shift[shift_code_root+"65"])
 	print(len(o12_idx2),len(o13_idx1),len(o23_idx2))
 	print(len(list(set(o12_idx2).intersection(o23_idx2))))
 	print(len(list(set(o13_idx3).intersection(o23_idx3))))
@@ -438,14 +423,18 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	print("b growth", sum(b_growth)/len(b_growth), increase)
 
 	print(overlap_dict)
-	return overlap_dict, o13_idx3, o23_idx3
+	return overlap_dict
 
-
-overlap_dict, o13_idx3, o23_idx3 = calculate_overlaps_for_trial_group(1, 3, '_r1')
-selection_by_thresholding("3", "1", region="_r1")
-selection_by_thresholding("3", "2", region="_r1")
-selection_by_thresholding("3", "3", region="_r1")
-
-
-selection_by_thresholding("3", "3", region="_r1", ov_idxs = o13_idx3)
-selection_by_thresholding("3", "3", region="_r1", ov_idxs = o23_idx3)
+	
+	
+'''
+calculate_overlaps_for_trial_group(1, 1, '', first = True)
+calculate_overlaps_for_trial_group(1, 1, '_r2')
+'''
+#calculate_overlaps_for_trial_group(1, 2, '_r1')
+calculate_overlaps_for_trial_group(1, 3, '_r1')
+'''
+calculate_overlaps_for_trial_group(1, 9, '_r2')
+calculate_overlaps_for_trial_group(1, 12, '_r1')
+calculate_overlaps_for_trial_group(1, 8, '_r1')
+'''
