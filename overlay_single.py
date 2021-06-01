@@ -25,12 +25,18 @@ shift = {
     'm3_r1s31' : [19,-9,0],
     'm3_r1s32' : [12,4,0],
     'm3_r1s21' : [7,-13,0],
+    'm4_r1s31' : [-8, 61, 0],
+    'm4_r1s32' : [-8, 56, 0],
+    'm4_r1s21' : [7,5,0],
 }
 
 shift_key_root = 'm{}s{}{}'
 
 red = Color(255, 0, 0)
 green = Color(0, 255, 0)
+white = Color(255, 255, 255)
+yellow = Color(255, 255, 0)
+blue = Color(0, 0, 255)
 
 roi_diameter = [8,7,4]
 area_scale_factor = pow(roi_diameter[0]/2,2) + 2*pow(roi_diameter[1]/2,2) + 2*pow(roi_diameter[2]/2,2)
@@ -41,7 +47,8 @@ scale_coeff = {
     'z': 2
 }
 
-directory = "/mnt/ula/twophoton/2p_fosgfp2020/processing/"
+directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/"
+
 
 mouse = 2
 sole_ctx_session = 1
@@ -50,13 +57,13 @@ img_source_file = "m{}s{}{}_tst_sa.tif"
 source_file = "result_label_m{}s{}{}.csv"
 overlap_file = "overlap_m{}{}s{}.csv"
 result_file = "cells_thresholded_m{}s{}{}.csv"
+bgr_file = "result_bg_m{}{}.csv"
 
 radius_microns = 5
 min_dist = 1.2*radius_microns
 
 tolerance = radius_microns
 
-position_in_overlap = 0
 overlap_idxs = []
 
 rm = RoiManager.getInstance()
@@ -152,21 +159,18 @@ def draw_histogram_with_thre(title, array, threshold):
 	plt.drawDottedLine(threshold, plt_limits[-2], threshold, len(array), 5)
 	plt.show()
 
-def create_roi_group(x, y, z, img, idx, ov_idxs):
+def create_roi_group(x, y, z, img, color, in_ovlap = False):
 	roi_group = []
 	mean = 0
 	stdev = 0
-	if ov_idxs is not None:
-		if idx in overlap_idxs:
-			roi.setStrokeColor(green)
-			for i in range(-2,3):
+	if in_ovlap:
+		for i in range(-2,3):
+			if(z+i > 0):
 				diameter = roi_diameter[abs(i)]
-				#TODO delete
-				diameter = roi_diameter[abs(0)]
 				rad = diameter/2
 				img.setSlice(z+i)
 				roi = OvalRoi(x-rad, y-rad, diameter, diameter)
-				
+				roi.setStrokeColor(green)	
 				roi.setPosition(z+i)
 				img.setRoi(roi)
 				stats = roi.getStatistics()
@@ -174,27 +178,57 @@ def create_roi_group(x, y, z, img, idx, ov_idxs):
 				if i == 0:
 					stdev = stats.stdDev
 				roi_group.append(roi)
-			mean /= area_scale_factor
+		mean /= area_scale_factor
 	else:
 		for i in range(-2,3):
-			diameter = roi_diameter[abs(i)]
-			#TODO delete
-			diameter = roi_diameter[abs(0)]
-			rad = diameter/2
-			img.setSlice(z+i)
-			roi = OvalRoi(x-rad, y-rad, diameter, diameter)
-			
-			roi.setPosition(z+i)
-			img.setRoi(roi)
-			stats = roi.getStatistics()
-			mean += stats.mean * pow(rad,2)
-			if i == 0:
-				stdev = stats.stdDev
-			roi_group.append(roi)
+			if(z+i > 0):
+				diameter = roi_diameter[abs(i)]
+				rad = diameter/2
+				img.setSlice(z+i)
+				roi = OvalRoi(x-rad, y-rad, diameter, diameter)
+				roi.setStrokeColor(color)		
+				roi.setPosition(z+i)
+				img.setRoi(roi)
+				stats = roi.getStatistics()
+				mean += stats.mean * pow(rad,2)
+				if i == 0:
+					stdev = stats.stdDev
+				roi_group.append(roi)
 		mean /= area_scale_factor
 	return roi_group, mean, stdev
 
-def prepare_roi_stats_dict(mouse_no, session_no, img, region="", ov_idxs=None):
+def estimate_bgr(mouse_no, session_no, region):
+	img_path = directory + img_source_file.format(mouse_no, session_no, region)
+	img = ImagePlus(img_path)
+	
+	sum_of_means = 0
+	bgr_file = directory + source_file.format(mouse_no, session_no, region)
+
+	with open(bgr_file,"r") as source:
+	    rdr = csv.DictReader( source )
+	    for ctr in rdr:
+	    	x = int(float(ctr['X']))
+	    	y = int(float(ctr['Y']))
+	    	z = int(float(ctr['Z']))
+	    	mean = 0
+	    	for i in range(-2,3):
+	    		if(z+i > 0):
+					diameter = roi_diameter[abs(i)]
+					rad = diameter/2
+					img.setSlice(z+i)
+					roi = OvalRoi(x-rad, y-rad, diameter, diameter)
+					roi.setStrokeColor(green)	
+					roi.setPosition(z+i)
+					img.setRoi(roi)
+					stats = roi.getStatistics()
+					mean += stats.mean * pow(rad,2)
+					if i == 0:
+						stdev = stats.stdDev
+			mean /= area_scale_factor
+			sum_of_means += mean
+	return sum_of_means/1000
+
+def prepare_roi_stats_dict(mouse_no, session_no, img, color, region="", ov_idxs=None):
 	cells_file = directory + source_file.format(mouse_no, session_no, region)
 	
 	roi_dict = {
@@ -209,29 +243,48 @@ def prepare_roi_stats_dict(mouse_no, session_no, img, region="", ov_idxs=None):
 	    for r in rdr:
 	    	pos = int(float(r['Z']))
 	    	idx += 1
-	    	if (pos >5 and pos <75):
-		    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), 
-		    	int(float(r['Y'])), int(float(r['Z'])), img, idx, ov_idxs)
-		    	roi_dict['means'].append(mean)
-		    	roi_dict['stdev'].append(stdev)
-		    	roi_dict['rois'].append(roi_group)   
+	    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), int(float(r['Y'])), int(float(r['Z'])), img, color)
+	    	roi_dict['means'].append(mean)
+	    	roi_dict['stdev'].append(stdev)
+	    	roi_dict['rois'].append(roi_group)   
 	return roi_dict
 
-def selection_by_thresholding(mouse_no, session_no, region="", ov_idxs = None):
+def overlap_imgs(mouse_no, session_no, ov_idxs, cells_list, region=""):
 	img_path = directory + img_source_file.format(mouse_no, session_no, region)
 	result_file_path = directory + result_file.format(mouse_no, session_no, region)
 	
 	imp = ImagePlus(img_path)
-	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, region, ov_idxs)
-	mean_threshold = otsu_thre(roi_dict['means'])
+
 
 	cell_list = []
+	overlay = Overlay()
+	for ov_idx in ov_idxs:
+		ov_cell = cells_list[ov_idx]
+		pos = ov_cell[2]
+		roi_group, mean, stdev = create_roi_group(ov_cell[0], ov_cell[1], pos, imp, color, True)
+		for roi in roi_group:
+			overlay.add(roi)
+	imp.setOverlay(overlay)
+
+	
+	imp.show()
+
+def selection_by_thresholding(mouse_no, session_no, region="", color = white, bgr = 0):
+	img_path = directory + img_source_file.format(mouse_no, session_no, region)
+	result_file_path = directory + result_file.format(mouse_no, session_no, region)
+	
+	imp = ImagePlus(img_path)
+	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, color, region)
+	mean_threshold = otsu_thre(roi_dict['means'])/2
+
+	cell_list = []
+	
 	overlay = Overlay()
 	with open(result_file_path,"w") as result:
 		wtr = csv.writer( result )
 		wtr.writerow( field_names_coords )
 		for idx, roi in enumerate(roi_dict['rois']):
-			if(roi_dict['means'][idx] > mean_threshold/3):
+			if(roi_dict['means'][idx] > mean_threshold):
 				vals = []
 				for c in roi[2].getContourCentroid():
 					vals.append(int(c))
@@ -239,12 +292,15 @@ def selection_by_thresholding(mouse_no, session_no, region="", ov_idxs = None):
 				vals.append(roi_dict['means'][idx])
 				cell_list.append(vals)
 				wtr.writerow(vals)
+				
 				for roi_p in roi:
 					overlay.add(roi_p)
+				
+	
 	imp.setOverlay(overlay)
-
 	
 	imp.show()
+	
 	draw_histogram_with_thre('srednia intensywnosc w obrebie roi', roi_dict['means'], mean_threshold)
 	
 	print(len(cell_list))
@@ -396,17 +452,19 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	overlap_dict = OrderedDict(sorted(overlap_dict.items(), key=lambda t: t[0]))
 
 	save_dict(overlap_dict, first)
-	
+	'''
 	_, o12_idx1, o12_idx2 = find_overlap(cells_dict["1"], cells_dict["2"], shift[shift_code_root+"21"])
 	_, o13_idx1, o13_idx3 = find_overlap(cells_dict["1"], cells_dict["3"], shift[shift_code_root+"31"])
 	_, o23_idx2, o23_idx3 = find_overlap(cells_dict["2"], cells_dict["3"], shift[shift_code_root+"32"])
-	'''
+
 	print(len(o12_idx2),len(o13_idx1),len(o23_idx2))
 	print(len(list(set(o12_idx2).intersection(o23_idx2))))
 	print(len(list(set(o13_idx3).intersection(o23_idx3))))
 	print(len(list(set(o12_idx1).intersection(o13_idx1))))
 	'''	
-
+	#overlap_imgs("3", "3", o13_idx3, cells_dict["3"], region="_r1")
+	#overlap_imgs("3", "3", o23_idx3, cells_dict["3"], region="_r1")
+	
 	a_spec = []
 	b_spec1 = []
 	b1_ex = []
@@ -438,14 +496,18 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	print("b growth", sum(b_growth)/len(b_growth), increase)
 
 	print(overlap_dict)
-	return overlap_dict, o13_idx3, o23_idx3
+#	return overlap_dict, o13_idx3, o23_idx3
 
 
-overlap_dict, o13_idx3, o23_idx3 = calculate_overlaps_for_trial_group(1, 3, '_r1')
-selection_by_thresholding("3", "1", region="_r1")
-selection_by_thresholding("3", "2", region="_r1")
-selection_by_thresholding("3", "3", region="_r1")
-
-
-selection_by_thresholding("3", "3", region="_r1", ov_idxs = o13_idx3)
-selection_by_thresholding("3", "3", region="_r1", ov_idxs = o23_idx3)
+#overlap_dict, o13_idx3, o23_idx3 = calculate_overlaps_for_trial_group(1, 3, '_r1')
+'''
+selection_by_thresholding(3, 1, region="_r1", color = yellow)
+selection_by_thresholding(3, 2, region="_r1", color = red)
+selection_by_thresholding(3, 3, region="_r1", color = red)
+'''
+bgr = estimate_bgr(3, 1, region="_r1")
+selection_by_thresholding(3, 1, region="_r1", color = yellow, bgr = bgr)
+estimate_bgr(3, 2, region="_r1")
+selection_by_thresholding(3, 2, region="_r1", color = yellow, bgr = bgr)
+estimate_bgr(3, 3, region="_r1")
+selection_by_thresholding(3, 3, region="_r1", color = yellow, bgr = bgr)

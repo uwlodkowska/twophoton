@@ -23,6 +23,9 @@ shift = {
     'm3_r1s31' : [19,-9,0],
     'm3_r1s32' : [12,4,0],
     'm3_r1s21' : [7,-13,0],
+    'm4_r1s31' : [-8, 61, 0],
+    'm4_r1s32' : [-8, 56, 0],
+    'm4_r1s21' : [0,5,0],
     'm12_r1s31' : [7,10,0],
     'm12_r1s32' : [7,12,0],
     'm12_r1s21' : [0,-2,0],
@@ -32,6 +35,9 @@ shift = {
     'm8_r1s31' : [0, 50, 0],
     'm8_r1s32' : [7,13, 0],
     'm8_r1s21' : [-7,37, 0],
+    'm7_r1s31' : [4, 13, 0],
+    'm7_r1s32' : [1, 17, 0],
+    'm7_r1s21' : [3, -4, 0],
 }
 
 shift_key_root = 'm{}s{}{}'
@@ -48,13 +54,14 @@ scale_coeff = {
     'z': 2
 }
 
-directory = "/mnt/ula/twophoton/2p_fosgfp2020/processing/"
+directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/"
+
 
 mouse = 2
 sole_ctx_session = 1
 rep_ctx_sessions = [2,3]
 
-img_source_file = "m{}s{}{}_tst_sa.tif"
+img_source_file = "m{}s{}{}_tst_sca.tif"
 source_file = "result_label_m{}s{}{}.csv"
 overlap_file = "overlap_m{}{}s{}.csv"
 result_file = "cells_thresholded_m{}s{}{}.csv"
@@ -209,7 +216,7 @@ def selection_by_thresholding(mouse_no, session_no, region=""):
 	
 	imp = ImagePlus(img_path)
 	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, region)
-	mean_threshold = otsu_thre(roi_dict['means'])
+	mean_threshold = otsu_thre(roi_dict['means'])/2
 
 	cell_list = []
 	overlay = Overlay()
@@ -279,7 +286,48 @@ def save_dict(overlap_dict, first = False):
 			writer = csv.DictWriter(csvfile, overlap_dict.keys())
 			writer.writerow(overlap_dict)
 
+
+def estimate_bgr(mouse_no, session_no, region):
+	img_path = directory + img_source_file.format(mouse_no, session_no, region)
+	img = ImagePlus(img_path)
+	
+	sum_of_means = 0
+	bgr_file = directory + source_file.format(mouse_no, session_no, region)
+
+	with open(bgr_file,"r") as source:
+	    rdr = csv.DictReader( source )
+	    for ctr in rdr:
+	    	x = int(float(ctr['X']))
+	    	y = int(float(ctr['Y']))
+	    	z = int(float(ctr['Z']))
+	    	mean = 0
+	    	for i in range(-2,3):
+	    		if(z+i > 0):
+					diameter = roi_diameter[abs(i)]
+					rad = diameter/2
+					img.setSlice(z+i)
+					roi = OvalRoi(x-rad, y-rad, diameter, diameter)
+					roi.setStrokeColor(green)	
+					roi.setPosition(z+i)
+					img.setRoi(roi)
+					stats = roi.getStatistics()
+					mean += stats.mean * pow(rad,2)
+					if i == 0:
+						stdev = stats.stdDev
+			mean /= area_scale_factor
+			sum_of_means += mean
+	return sum_of_means/1000
+
+def sorting_wrapper(i):
+
+	def sorting_func(e):
+		return e[i]
+		
+	return sorting_func
+
 def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first = False):
+	bgrs = [0,0,0]
+
 	
 	shift_code_root = "m" + str(mouse) + reg_code 
 
@@ -300,6 +348,7 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	
 	for i in range(3):
 		session_code = str(starting_session + i)
+		bgrs[i] = estimate_bgr(mouse, i+1, region=reg_code)
 		cells_dict[session_code] = selection_by_thresholding(str(mouse), session_code, region=reg_code)
 		all_cells_count += len(cells_dict[session_code])
 	
@@ -398,14 +447,39 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	b2_ex = []
 	b_spec2 = []
 	b_growth = []
+
+	b1a_arr = []
+	b1b2_arr = []
+	b2a_arr = []
 	increase = 0
-	print(len(intensity_dict.keys()))
+	b1a_zero = 0
+
+	
+	val_list = intensity_dict.values()
+	val_list.sort(reverse=True, key = sorting_wrapper(0))
+	print(val_list)
+	for i in range(3):
+			print(len(cells_dict[str(i+1)])	)
+	#print(val_list.sort(reverse=True, key = sorting_wrapper(1)))
+
+
 	for i in intensity_dict.keys():
 		#if not (None in intensity_dict[i]):
-		b1a = intensity_dict[i][1] - intensity_dict[i][0]
-		b2a = intensity_dict[i][2] - intensity_dict[i][0]
-		b1b2 = intensity_dict[i][2] - intensity_dict[i][1]
+		b1a = intensity_dict[i][1] - intensity_dict[i][0] + bgrs[0]-bgrs[1]
+		b2a = intensity_dict[i][2] - intensity_dict[i][0] + bgrs[0]-bgrs[2]
+		b1b2 = intensity_dict[i][2] - intensity_dict[i][1] + bgrs[1]-bgrs[2]
+
+		if b1a < 10:
+			b1a_zero != 1
+
 		
+		if(intensity_dict[i][1] > 0 and intensity_dict[i][0] > 0):
+			b1a_arr.append(b1a)
+		if(intensity_dict[i][2] > 0 and intensity_dict[i][1] > 0):
+			b1b2_arr.append(b1b2)
+		if(intensity_dict[i][2] > 0 and intensity_dict[i][0] > 0):
+			b2a_arr.append(b2a)
+			
 		if b1a > 30 and b2a > 30:
 			b_spec1.append(intensity_dict[i][1])
 			b_spec2.append(intensity_dict[i][2])
@@ -415,26 +489,34 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 				increase += 1
 		elif b1a < -30 and b2a < -30:
 			a_spec.append(intensity_dict[i][0])
-			
+	print(b1a_zero)	
+	if (len(a_spec) >0):
+		print("a spec", len(a_spec), sum(a_spec)/len(a_spec))
+	if (len(b_spec1) >0):
+		print("b spec1", len(b_spec1), sum(b_spec1)/len(b_spec1))
+	if (len(b_spec2) >0):
+		print("b spec2", len(b_spec2), sum(b_spec2)/len(b_spec2))
+	if (len(b_growth) >0):
+		print("b growth", sum(b_growth)/len(b_growth), increase)
 
-	print("a spec", len(a_spec), sum(a_spec)/len(a_spec))
-	print("b spec1", len(b_spec1), sum(b_spec1)/len(b_spec1))
-	print("b spec2", len(b_spec2), sum(b_spec2)/len(b_spec2))
-	print("b growth", sum(b_growth)/len(b_growth), increase)
-
+	draw_histogram_with_thre(str(mouse) + reg_code + ' ab consec', b1a_arr, 0)
+	draw_histogram_with_thre(str(mouse) + reg_code + ' b1b2', b1b2_arr, 0)
+	draw_histogram_with_thre(str(mouse) + reg_code + ' b2a', b2a_arr, 0)
+	
 	print(overlap_dict)
 	return overlap_dict
 
 	
-	
-'''
-calculate_overlaps_for_trial_group(1, 1, '', first = True)
-calculate_overlaps_for_trial_group(1, 1, '_r2')
-'''
-#calculate_overlaps_for_trial_group(1, 2, '_r1')
+
 calculate_overlaps_for_trial_group(1, 3, '_r1')
 '''
+calculate_overlaps_for_trial_group(1, 2, '_r1')
+calculate_overlaps_for_trial_group(1, 4, '_r1')
+
+calculate_overlaps_for_trial_group(1, 7, '_r1')
+
 calculate_overlaps_for_trial_group(1, 9, '_r2')
 calculate_overlaps_for_trial_group(1, 12, '_r1')
 calculate_overlaps_for_trial_group(1, 8, '_r1')
 '''
+
