@@ -312,8 +312,6 @@ def estimate_bgr(mouse_no, session_no, region):
 					img.setRoi(roi)
 					stats = roi.getStatistics()
 					mean += stats.mean * pow(rad,2)
-					if i == 0:
-						stdev = stats.stdDev
 			mean /= area_scale_factor
 			sum_of_means += mean
 	return sum_of_means/1000
@@ -324,6 +322,16 @@ def sorting_wrapper(i):
 		return e[i]
 		
 	return sorting_func
+
+def inspect_brightest(val_list, cells_dict, idx, bgrs):
+	brightest_fraction = 0.1
+	val_list.sort(reverse=True, key = sorting_wrapper(idx))
+	total_cells_number = len(cells_dict[str(idx+1)])
+	cells_to_analyze = int(brightest_fraction*total_cells_number)
+	for i in range(3):
+		if i != idx:
+			arr = [row[i] - bgrs[i] for row in val_list[:cells_to_analyze] if row[i] - bgrs[i] > 0]
+			draw_histogram_with_thre(str(idx) + " to " + str(i), arr, 0)
 
 def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first = False):
 	bgrs = [0,0,0]
@@ -455,11 +463,9 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	b1a_zero = 0
 
 	
-	val_list = intensity_dict.values()
-	val_list.sort(reverse=True, key = sorting_wrapper(0))
-	print(val_list)
-	for i in range(3):
-			print(len(cells_dict[str(i+1)])	)
+	inspect_brightest(intensity_dict.values(), cells_dict, 0, bgrs)
+	inspect_brightest(intensity_dict.values(), cells_dict, 1, bgrs)
+
 	#print(val_list.sort(reverse=True, key = sorting_wrapper(1)))
 
 
@@ -498,11 +504,11 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 		print("b spec2", len(b_spec2), sum(b_spec2)/len(b_spec2))
 	if (len(b_growth) >0):
 		print("b growth", sum(b_growth)/len(b_growth), increase)
-
+	'''
 	draw_histogram_with_thre(str(mouse) + reg_code + ' ab consec', b1a_arr, 0)
 	draw_histogram_with_thre(str(mouse) + reg_code + ' b1b2', b1b2_arr, 0)
 	draw_histogram_with_thre(str(mouse) + reg_code + ' b2a', b2a_arr, 0)
-	
+	'''
 	print(overlap_dict)
 	return overlap_dict
 
