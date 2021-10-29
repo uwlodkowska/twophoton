@@ -53,8 +53,10 @@ directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/"
 mouse = 2
 sole_ctx_session = 1
 rep_ctx_sessions = [2,3]
-img_source_file = "m{}s{}{}_tst_sa.tif"
+img_source_file = "m{}s{}{}_tst_sca.tif"
+thresholded_img = "result_m{}s{}{}.tif"
 source_file = "result_label_m{}s{}{}.csv"
+bgr_source_file = "result_bg_m{}s{}{}.csv"
 overlap_file = "overlap_m{}{}s{}.csv"
 result_file = "cells_thresholded_m{}s{}{}.csv"
 bgr_file = "result_bg_m{}{}.csv"
@@ -202,7 +204,7 @@ def estimate_bgr(mouse_no, session_no, region):
 	img = ImagePlus(img_path)
 	
 	sum_of_means = 0
-	bgr_file = directory + source_file.format(mouse_no, session_no, region)
+	bgr_file = directory + bgr_source_file.format(mouse_no, session_no, region)
 
 	with open(bgr_file,"r") as source:
 	    rdr = csv.DictReader( source )
@@ -228,8 +230,8 @@ def estimate_bgr(mouse_no, session_no, region):
 			sum_of_means += mean
 	return sum_of_means/1000
 
-def prepare_roi_stats_dict(mouse_no, session_no, img, color, region="", ov_idxs=None):
-	cells_file = directory + source_file.format(mouse_no, session_no, region)
+def prepare_roi_stats_dict(mouse_no, session_no, img, filename, color, region="", ov_idxs=None):
+	cells_file = directory + filename.format(mouse_no, session_no, region)
 	
 	roi_dict = {
 		'rois' : [],
@@ -241,16 +243,16 @@ def prepare_roi_stats_dict(mouse_no, session_no, img, color, region="", ov_idxs=
 	    rdr = csv.DictReader( source )
 	    idx = 0
 	    for r in rdr:
-	    	pos = int(float(r['Z']))
+	    	pos = int(float(r['Z'])) -1
 	    	idx += 1
-	    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), int(float(r['Y'])), int(float(r['Z'])), img, color)
+	    	roi_group, mean, stdev = create_roi_group(int(float(r['X'])), int(float(r['Y'])), pos, img, color)
 	    	roi_dict['means'].append(mean)
 	    	roi_dict['stdev'].append(stdev)
 	    	roi_dict['rois'].append(roi_group)   
 	return roi_dict
 
 def overlap_imgs(mouse_no, session_no, ov_idxs, cells_list, region=""):
-	img_path = directory + img_source_file.format(mouse_no, session_no, region)
+	img_path = directory + thresholded_img.format(mouse_no, session_no, region)
 	result_file_path = directory + result_file.format(mouse_no, session_no, region)
 	
 	imp = ImagePlus(img_path)
@@ -274,7 +276,8 @@ def selection_by_thresholding(mouse_no, session_no, region="", color = white, bg
 	result_file_path = directory + result_file.format(mouse_no, session_no, region)
 	
 	imp = ImagePlus(img_path)
-	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, color, region)
+	roi_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, source_file, color, region)
+	bgr_dict = prepare_roi_stats_dict(mouse_no, session_no, imp, bgr_source_file, green, region)
 	mean_threshold = otsu_thre(roi_dict['means'])/2
 
 	cell_list = []
@@ -286,15 +289,19 @@ def selection_by_thresholding(mouse_no, session_no, region="", color = white, bg
 		for idx, roi in enumerate(roi_dict['rois']):
 			if(roi_dict['means'][idx] > mean_threshold):
 				vals = []
-				for c in roi[2].getContourCentroid():
+				for c in roi[int(len(roi)/2)].getContourCentroid():
 					vals.append(int(c))
-				vals.append(roi[2].getPosition())
+				vals.append(roi[int(len(roi)/2)].getPosition())
 				vals.append(roi_dict['means'][idx])
 				cell_list.append(vals)
 				wtr.writerow(vals)
 				
 				for roi_p in roi:
 					overlay.add(roi_p)
+
+		'''for idx, roi in enumerate(bgr_dict['rois']):
+			for roi_p in roi:
+				overlay.add(roi_p)'''
 				
 	
 	imp.setOverlay(overlay)
@@ -505,9 +512,6 @@ selection_by_thresholding(3, 1, region="_r1", color = yellow)
 selection_by_thresholding(3, 2, region="_r1", color = red)
 selection_by_thresholding(3, 3, region="_r1", color = red)
 '''
-bgr = estimate_bgr(3, 1, region="_r1")
-selection_by_thresholding(3, 1, region="_r1", color = yellow, bgr = bgr)
-estimate_bgr(3, 2, region="_r1")
-selection_by_thresholding(3, 2, region="_r1", color = yellow, bgr = bgr)
-estimate_bgr(3, 3, region="_r1")
-selection_by_thresholding(3, 3, region="_r1", color = yellow, bgr = bgr)
+bgr = estimate_bgr(8, 1, region="_r1")
+print("bgr ", bgr)
+selection_by_thresholding(8, 1, region="_r1", color = yellow, bgr = bgr)

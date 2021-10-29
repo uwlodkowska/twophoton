@@ -23,18 +23,24 @@ shift = {
     'm3_r1s31' : [19,-9,0],
     'm3_r1s32' : [12,4,0],
     'm3_r1s21' : [7,-13,0],
+    'm3_r2s31' : [-9,-15,0],
+    'm3_r2s32' : [-2,-3,0],
+    'm3_r2s21' : [-7,-12,0],
     'm4_r1s31' : [-8, 61, 0],
     'm4_r1s32' : [-8, 56, 0],
     'm4_r1s21' : [0,5,0],
+    'm6_r2s31' : [-5, 19, 0],
+    'm6_r2s32' : [-2, 1, 0],
+    'm6_r2s21' : [-3, 18, 0],
     'm12_r1s31' : [7,10,0],
     'm12_r1s32' : [7,12,0],
     'm12_r1s21' : [0,-2,0],
     'm9_r2s31' : [10, 19, 0],
     'm9_r2s32' : [8,3, 0],
     'm9_r2s21' : [2, 16, 0],
-    'm8_r1s31' : [0, 50, 0],
-    'm8_r1s32' : [7,13, 0],
-    'm8_r1s21' : [-7,37, 0],
+    'm8_r1s31' : [-7, -15, 0],
+    'm8_r1s32' : [-3,-2, 0],
+    'm8_r1s21' : [-4,-13, 0],
     'm7_r1s31' : [4, 13, 0],
     'm7_r1s32' : [1, 17, 0],
     'm7_r1s21' : [3, -4, 0],
@@ -63,6 +69,7 @@ rep_ctx_sessions = [2,3]
 
 img_source_file = "m{}s{}{}_tst_sca.tif"
 source_file = "result_label_m{}s{}{}.csv"
+bgr_source_file = "result_bg_m{}s{}{}.csv"
 overlap_file = "overlap_m{}{}s{}.csv"
 result_file = "cells_thresholded_m{}s{}{}.csv"
 
@@ -159,7 +166,7 @@ def otsu_thre(arr):
     return threshold
 
 def draw_histogram_with_thre(title, array, threshold):
-	plt = Plot("histogram", title, "liczba komorek")
+	plt = Plot("histogram", title, "number of cells")
 	plt.addHistogram(array)
 	plt.setColor(red)
 	plt.setLineWidth(5)
@@ -238,8 +245,9 @@ def selection_by_thresholding(mouse_no, session_no, region=""):
 
 	'''
 	imp.show()
-	draw_histogram_with_thre('srednia intensywnosc w obrebie roi', roi_dict['means'], mean_threshold)
 	'''
+	#draw_histogram_with_thre('srednia intensywnosc w obrebie roi', roi_dict['means'], mean_threshold)
+	
 	print("all cells for mouse " + mouse_no + ", session " + session_no + ": ", len(cell_list))
 	return cell_list
 
@@ -292,7 +300,7 @@ def estimate_bgr(mouse_no, session_no, region):
 	img = ImagePlus(img_path)
 	
 	sum_of_means = 0
-	bgr_file = directory + source_file.format(mouse_no, session_no, region)
+	bgr_file = directory + bgr_source_file.format(mouse_no, session_no, region)
 
 	with open(bgr_file,"r") as source:
 	    rdr = csv.DictReader( source )
@@ -331,7 +339,7 @@ def inspect_brightest(val_list, cells_dict, idx, bgrs):
 	for i in range(3):
 		if i != idx:
 			arr = [row[i] - bgrs[i] for row in val_list[:cells_to_analyze] if row[i] - bgrs[i] > 0]
-			draw_histogram_with_thre(str(idx) + " to " + str(i), arr, 0)
+			#draw_histogram_with_thre(str(idx) + " to " + str(i), arr, 0)
 
 def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first = False):
 	bgrs = [0,0,0]
@@ -357,6 +365,7 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	for i in range(3):
 		session_code = str(starting_session + i)
 		bgrs[i] = estimate_bgr(mouse, i+1, region=reg_code)
+		print("bgr " + str(i), bgrs[i])
 		cells_dict[session_code] = selection_by_thresholding(str(mouse), session_code, region=reg_code)
 		all_cells_count += len(cells_dict[session_code])
 	
@@ -504,25 +513,37 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 		print("b spec2", len(b_spec2), sum(b_spec2)/len(b_spec2))
 	if (len(b_growth) >0):
 		print("b growth", sum(b_growth)/len(b_growth), increase)
-	'''
+	
 	draw_histogram_with_thre(str(mouse) + reg_code + ' ab consec', b1a_arr, 0)
 	draw_histogram_with_thre(str(mouse) + reg_code + ' b1b2', b1b2_arr, 0)
 	draw_histogram_with_thre(str(mouse) + reg_code + ' b2a', b2a_arr, 0)
-	'''
+	
 	print(overlap_dict)
 	return overlap_dict
 
 	
-
-calculate_overlaps_for_trial_group(1, 3, '_r1')
 '''
 calculate_overlaps_for_trial_group(1, 2, '_r1')
-calculate_overlaps_for_trial_group(1, 4, '_r1')
+
+calculate_overlaps_for_trial_group(1, 3, '_r1')
+
 
 calculate_overlaps_for_trial_group(1, 7, '_r1')
 
+
+
 calculate_overlaps_for_trial_group(1, 9, '_r2')
+
 calculate_overlaps_for_trial_group(1, 12, '_r1')
-calculate_overlaps_for_trial_group(1, 8, '_r1')
+
+calculate_overlaps_for_trial_group(1, 6, '_r2')
+
+calculate_overlaps_for_trial_group(1, 3, '_r2')
+calculate_overlaps_for_trial_group(1, 4, '_r1')
 '''
+
+
+
+
+calculate_overlaps_for_trial_group(1, 8, '_r1')
 
