@@ -47,7 +47,7 @@ scale_coeff = {
     'z': 2
 }
 
-directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/"
+directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/1/"
 
 
 mouse = 2
@@ -287,7 +287,7 @@ def selection_by_thresholding(mouse_no, session_no, region="", color = white, bg
 		wtr = csv.writer( result )
 		wtr.writerow( field_names_coords )
 		for idx, roi in enumerate(roi_dict['rois']):
-			if(roi_dict['means'][idx] > mean_threshold):
+			if(roi_dict['means'][idx] > 0):#mean_threshold):
 				vals = []
 				for c in roi[int(len(roi)/2)].getContourCentroid():
 					vals.append(int(c))
@@ -512,6 +512,6 @@ selection_by_thresholding(3, 1, region="_r1", color = yellow)
 selection_by_thresholding(3, 2, region="_r1", color = red)
 selection_by_thresholding(3, 3, region="_r1", color = red)
 '''
-bgr = estimate_bgr(8, 1, region="_r1")
+bgr = estimate_bgr(1, 1, region="_r1")
 print("bgr ", bgr)
-selection_by_thresholding(8, 1, region="_r1", color = yellow, bgr = bgr)
+selection_by_thresholding(1, 1, region="_r1", color = yellow, bgr = bgr)

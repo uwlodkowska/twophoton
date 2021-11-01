@@ -5,7 +5,40 @@ from ij.plugin.frame import RoiManager
 import csv, math
 from collections import OrderedDict
 
+#iteration 1
 intersession_codes = {
+	'1' : {
+		'21' : 'b1b2',
+		'32' : 'a1b2',
+		'32' : 'ab_consec',
+	},
+	'other' : {
+		'21' : 'ab_consec',
+		'31' : 'a1b2',
+		'32' : 'b1b2',
+		'54' : 'ab_consec',
+		'64' : 'a1b2',
+		'65' : 'b1b2',
+	},
+}
+
+shift = {
+    'm1_r1s21' : [5, 7,0],
+    'm1_r1s31' : [3, -1, 0],
+    'm1_r1s32' : [-2, -8,0],
+}
+
+
+#iteration 2 
+intersession_codes = {
+	'1' : {
+		'21' : 'ab_consec',
+		'31' : 'a1b2',
+		'32' : 'b1b2',
+		'54' : 'ab_consec',
+		'64' : 'a1b2',
+		'65' : 'b1b2',
+	},
 	'other' : {
 		'21' : 'ab_consec',
 		'31' : 'a1b2',
@@ -19,7 +52,7 @@ intersession_codes = {
 shift = {
     'm2_r1s31' : [2,18,0],
     'm2_r1s32' : [-10,28,0],
-    'm2_r1s21' : [13, -10,0],
+    'm2_r1s21' : [12, -10,0],
     'm3_r1s31' : [19,-9,0],
     'm3_r1s32' : [12,4,0],
     'm3_r1s21' : [7,-13,0],
