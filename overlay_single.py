@@ -36,7 +36,7 @@ sole_ctx_session = 1
 rep_ctx_sessions = [2,3]
 img_source_file = "m{}s{}{}.tif"
 img_source_file = "m{}r{}_{}.tif"
-img_source_file = "m{}r{}_ctx.tif"
+img_source_file = "m{}r{}_landmark.tif"
 thresholded_img = "m{}s{}{}_spots.tif"
 watershed_img = "m{}s{}{}_watershed.tif"
 source_file = "m{}r{}_ctx_output.txt"
@@ -170,7 +170,7 @@ def create_roi_group(x, y, z, vol, img, color, stdev_i, roundness,mean_i, idx):
 			roi_group.append(roi)
 	mean /= 150#area_scale_factor
 	for roi in roi_group:
-		if mean_i/mean > 1.5
+		if mean_i/mean > 1.5:
 			roi.setStrokeColor(red)
 	return roi_group, mean, stdev
 
@@ -245,6 +245,7 @@ def prepare_roi_stats_dict(mouse_no, session_no, img, filename, color, region=""
 
 def selection_by_thresholding(mouse_no, session_no, region="", color = white, bgr = 0):
 	img_path = directory + img_source_file.format(mouse_no, region)#, session_no)#thresholded_img#watershed_img#
+	print(img_path)
 	#img_path = "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/trans_tst/masked_despeckle.tif"
 	result_file_path = directory + result_file.format(mouse_no, session_no, region)
 	imp = ImagePlus(img_path)
@@ -333,3 +334,4 @@ def save_dict(overlap_dict, first = False):
 
 
 selection_by_thresholding(10, "1", region="1", color = green, bgr = 0)
+selection_by_thresholding(10, "2", region="1", color = green, bgr = 0)

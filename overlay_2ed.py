@@ -23,13 +23,20 @@ intersession_codes = {
 }
 
 shift = {
-    'm1_r1s21' : [5, 7,0],
-    'm1_r1s31' : [3, -1, 0],
-    'm1_r1s32' : [-2, -8,0],
+    'm1_r1s21' : [2, 8,0],
+    'm1_r1s31' : [-3, 1, 0],
+    'm1_r1s32' : [-5, -7,0],
+    'm22_r1s31' : [1,11,0],
+    'm22_r1s32' : [0,8,0],
+    'm22_r1s21' : [1,3,0],    
+    'm33_r1s31' : [2,5,0],
+    'm33_r1s32' : [-1,3,0],
+    'm33_r1s21' : [3, 2,0],
 }
 
 
 #iteration 2 
+
 intersession_codes = {
 	'1' : {
 		'21' : 'ab_consec',
@@ -48,7 +55,7 @@ intersession_codes = {
 		'65' : 'b1b2',
 	},
 }
-
+'''
 shift = {
     'm2_r1s31' : [2,18,0],
     'm2_r1s32' : [-10,28,0],
@@ -78,7 +85,7 @@ shift = {
     'm7_r1s32' : [1, 17, 0],
     'm7_r1s21' : [3, -4, 0],
 }
-
+'''
 shift_key_root = 'm{}s{}{}'
 
 red = Color(255, 0, 0)
@@ -93,8 +100,8 @@ scale_coeff = {
     'z': 2
 }
 
-directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/"
-
+directory = "/media/ula/D/ppp/fos_gfp_tmaze2/processing/1/"
+summary_filename = directory + "summary.csv"
 
 mouse = 2
 sole_ctx_session = 1
@@ -206,6 +213,7 @@ def draw_histogram_with_thre(title, array, threshold):
 	plt_limits = plt.getLimits()
 	plt.drawDottedLine(threshold, plt_limits[-2], threshold, len(array), 5)
 	plt.show()
+	return plt
 
 def create_roi_group(x, y, z, img):
 	roi_group = []
@@ -374,7 +382,7 @@ def inspect_brightest(val_list, cells_dict, idx, bgrs):
 			arr = [row[i] - bgrs[i] for row in val_list[:cells_to_analyze] if row[i] - bgrs[i] > 0]
 			#draw_histogram_with_thre(str(idx) + " to " + str(i), arr, 0)
 
-def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first = False):
+def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, sum_wtr, first = False):
 	bgrs = [0,0,0]
 
 	
@@ -389,7 +397,7 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	ov_idx_dict = {0:{}, 1:{}}
 	'''
 	cells_idx_dict - klucz - nr komorki na oryginalnej liscie;
-	value[i] jaki nr na liscie wszystkich komorek ma komórka nr <klucz> 
+	value[i] jaki nr na liscie wszystkich komorek ma kom rka nr <klucz> 
 	(idx klucz) z sesji starting_session + i
 	'''
 	cells_idx_dict = {}
@@ -480,8 +488,9 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 
 	overlap_dict = OrderedDict(sorted(overlap_dict.items(), key=lambda t: t[0]))
 
-	save_dict(overlap_dict, first)
+	
 	'''
+	save_dict(overlap_dict, first)
 	_, o12_idx1, o12_idx2 = find_overlap(cells_dict["4"], cells_dict["5"], shift[shift_code_root+"54"])
 	_, o13_idx1, o13_idx3 = find_overlap(cells_dict["4"], cells_dict["6"], shift[shift_code_root+"64"])
 	_, o23_idx2, o23_idx3 = find_overlap(cells_dict["5"], cells_dict["6"], shift[shift_code_root+"65"])
@@ -547,11 +556,26 @@ def calculate_overlaps_for_trial_group(starting_session, mouse, reg_code, first 
 	if (len(b_growth) >0):
 		print("b growth", sum(b_growth)/len(b_growth), increase)
 	
-	draw_histogram_with_thre(str(mouse) + reg_code + ' ab consec', b1a_arr, 0)
-	draw_histogram_with_thre(str(mouse) + reg_code + ' b1b2', b1b2_arr, 0)
-	draw_histogram_with_thre(str(mouse) + reg_code + ' b2a', b2a_arr, 0)
-	
+	plt1 = draw_histogram_with_thre(str(mouse) + reg_code + ' ab consec', b1a_arr, 0)
+	plt2 = draw_histogram_with_thre(str(mouse) + reg_code + ' b1b2', b1b2_arr, 0)
+	plt3 = draw_histogram_with_thre(str(mouse) + reg_code + ' b2a', b2a_arr, 0)
+
+	lim1 = plt1.getLimits()
+	lim2 = plt2.getLimits()
+	lim3 = plt3.getLimits()
+
+	sum_lim = [min(lim1[0], lim2[0], lim3[0]), max(lim1[1], lim2[1], lim3[1]), 0, max(lim1[3], lim2[3], lim3[3])]
+	plt1.setLimits(sum_lim)
+	plt2.setLimits(sum_lim)
+	plt3.setLimits(sum_lim)
+	print("sum_lim ", sum_lim)
+	plt1.update()
+	plt2.update()
+	plt3.update()
+
+	IJ.saveAs(plt1.getImagePlus(), "PNG", directory+"hists/m"+str(mouse) + reg_code + '_ab_consec');
 	print(overlap_dict)
+	sum_wtr.writerow( [mouse, float(overlap_dict['a1b2'][1]), float(overlap_dict['b1b2'][1]), float(overlap_dict['ab_consec'][1]) ])
 	return overlap_dict
 
 	
@@ -577,6 +601,10 @@ calculate_overlaps_for_trial_group(1, 4, '_r1')
 
 
 
-
-calculate_overlaps_for_trial_group(1, 8, '_r1')
+with open(summary_filename,"w") as result:
+	sum_wtr = csv.writer( result )
+	sum_wtr.writerow( ['mouse', 'a1b2', 'b1b2', 'ab_consec'] )
+	calculate_overlaps_for_trial_group(1, 1, '_r1', sum_wtr)
+	calculate_overlaps_for_trial_group(1, 22, '_r1', sum_wtr)
+	calculate_overlaps_for_trial_group(1, 33, '_r1', sum_wtr)
 
