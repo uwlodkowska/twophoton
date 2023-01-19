@@ -8,6 +8,7 @@ from skimage.draw import disk
 import numpy as np
 import pandas as pd
 from skimage import io
+import matplotlib.pyplot as plt
 
 dir_path = "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/alignment_result/aligned_despeckle/"
 
@@ -25,17 +26,18 @@ cell_data_fn_template = "m{}r{}_{}_output.txt"
 img_fn_template = "m{}r{}_{}.tif"
 
 
-def calculate_intensity(center_coords, img):
-    center_coords = [int(round(cc)) for cc in center_coords]
-    sum_int = 0
-    area_int = 0
+def calculate_intensity(center_coords_df, img):
+    center_coords_df = center_coords_df.round().astype(int)
+    sum_int = np.array([])
+    area_int = np.array([])
     for i in range(-2,3): #going through 5 flat slices making up the 3d cell
-        if(center_coords[2]+i >= 0 and center_coords[2]+i < img.shape[0]):
-            diameter = ROI_DIAMETER[abs(i)]
-            rad = diameter//2
-            disk_ = disk((center_coords[0], center_coords[1]), rad, shape=img[0].shape)
-            sum_int += np.sum(img[center_coords[2]+i][disk_])
-            area_int += len(img[center_coords[2]+i][disk_])
+        diameter = ROI_DIAMETER[abs(i)]
+        rad = diameter//2
+        in_range = (center_coords_df.iloc[:,2]+i >= 0 and center_coords_df.iloc[:,2]+i < img.shape[0])
+        disk_ = np.vectorize(disk)(xy, rad, shape=img[0].shape) 
+        sum_int += np.where(in_range, ret['intensity_standarized'], 
+                                0)
+        #area_int += len(img[center_coords[2][in_range]+i][disk_])
     return sum_int/area_int
 
 def filter_unstable_intensity(df, img):
@@ -64,16 +66,21 @@ def find_overlap(mouse, region, s_idxses, session_order):
     #wektoryzacja
     
 def test_fun(mouse, region, s_idxses, session_order):
-    pd.read_csv(dir_path + cell_data_fn_template
-                .format(mouse, region, session_order[s_idxses[0]]+"_"+session_order[s_idxses[1]]))
+    old_method_df = pd.read_csv(dir_path + cell_data_fn_template
+                .format(mouse, region, "_"+session_order[s_idxses[0]]+"_"+session_order[s_idxses[1]]))
     df = pd.read_csv(dir_path + cell_data_fn_template
                      .format(mouse, region, session_order[s_idxses[0]]), "\t", header=1)
+    img_ref = io.imread(dir_path + img_fn_template
+                    .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
     img = io.imread(dir_path + img_fn_template
                     .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
-    calculate_intensity([df[ICY_COLNAMES['xcol']],
-                                                               df[ICY_COLNAMES['ycol']],
-                                                               df[ICY_COLNAMES['zcol']]],
+    df["int1"] = calculate_intensity(df[[ICY_COLNAMES['xcol'], ICY_COLNAMES['ycol'],
+                                        ICY_COLNAMES['zcol']]], img_ref)
+    df["int2"] = calculate_intensity(df[ICY_COLNAMES['xcol']], df[ICY_COLNAMES['ycol']],df[ICY_COLNAMES['zcol']],
                                                                img)
+    plt.plot(df.int1)
+    
+test_fun(10, 1, [0,1], ["ctx", "landmark1", "landmark2"])
     
 
     
