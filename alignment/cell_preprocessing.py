@@ -25,20 +25,29 @@ single_session_cell_data_fn = "m{}r{}_{}_output.txt"#output from icy
 cell_data_fn_template = "m{}r{}_{}_output.txt"
 img_fn_template = "m{}r{}_{}.tif"
 
+def calculate_disk(coords, radius, disk_no, img):
+    center_z = coords[ICY_COLNAMES['zcol']]+disk_no
+    if center_z <0 or center_z>=img.shape[0]:
+        return [0,0] #spr czy to potrzebne
+    disk_ = disk((coords[ICY_COLNAMES['xcol']],coords[ICY_COLNAMES['ycol']]), radius,shape = img[0].shape) 
+    sum_int = np.sum(img[center_z][disk_])
+    area_int = len(img[center_z][disk_])
+    return [sum_int, area_int]
 
-def calculate_intensity(center_coords_df, img):
+def calculate_intensity(coords, img):
+    center_coords_df = coords[[ICY_COLNAMES['xcol'], ICY_COLNAMES['ycol'],ICY_COLNAMES['zcol']]]
     center_coords_df = center_coords_df.round().astype(int)
-    sum_int = np.array([])
-    area_int = np.array([])
+    sum_int = 0
+    area = 0
     for i in range(-2,3): #going through 5 flat slices making up the 3d cell
         diameter = ROI_DIAMETER[abs(i)]
         rad = diameter//2
-        in_range = (center_coords_df.iloc[:,2]+i >= 0 and center_coords_df.iloc[:,2]+i < img.shape[0])
-        disk_ = np.vectorize(disk)(xy, rad, shape=img[0].shape) 
-        sum_int += np.where(in_range, ret['intensity_standarized'], 
-                                0)
-        #area_int += len(img[center_coords[2][in_range]+i][disk_])
-    return sum_int/area_int
+        res = calculate_disk(center_coords_df,rad, i, img)
+        sum_int += res[0]
+        area += res[1]
+    if area == 0:
+        return 0
+    return sum_int/area
 
 def filter_unstable_intensity(df, img):
     df["intensity_standarized"] = calculate_intensity([df[ICY_COLNAMES['xcol']],
@@ -67,18 +76,18 @@ def find_overlap(mouse, region, s_idxses, session_order):
     
 def test_fun(mouse, region, s_idxses, session_order):
     old_method_df = pd.read_csv(dir_path + cell_data_fn_template
-                .format(mouse, region, "_"+session_order[s_idxses[0]]+"_"+session_order[s_idxses[1]]))
+                .format(mouse, region, session_order[s_idxses[1]]+"_"+session_order[s_idxses[0]]))
     df = pd.read_csv(dir_path + cell_data_fn_template
                      .format(mouse, region, session_order[s_idxses[0]]), "\t", header=1)
     img_ref = io.imread(dir_path + img_fn_template
+                    .format(mouse, region, session_order[s_idxses[0]])).astype("uint8")
+    img_comp = io.imread(dir_path + img_fn_template
                     .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
-    img = io.imread(dir_path + img_fn_template
-                    .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
-    df["int1"] = calculate_intensity(df[[ICY_COLNAMES['xcol'], ICY_COLNAMES['ycol'],
-                                        ICY_COLNAMES['zcol']]], img_ref)
-    df["int2"] = calculate_intensity(df[ICY_COLNAMES['xcol']], df[ICY_COLNAMES['ycol']],df[ICY_COLNAMES['zcol']],
-                                                               img)
+    print(old_method_df.columns, df.columns)
+    df["int1"] = df.apply(calculate_intensity, img = img_ref, axis = 1)
+    df["int2"] = df.apply(calculate_intensity, img = img_comp, axis = 1)
     plt.plot(df.int1)
+    plt.plot(df.int2, alpha=0.5)
     
 test_fun(10, 1, [0,1], ["ctx", "landmark1", "landmark2"])
     
