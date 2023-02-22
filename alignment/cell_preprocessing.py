@@ -10,20 +10,10 @@ import pandas as pd
 from skimage import io
 import matplotlib.pyplot as plt
 
-dir_path = "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/alignment_result/aligned_despeckle/"
+from constants import dir_path, ICY_COLNAMES, ROI_DIAMETER, FILENAMES, XY_SCALE,
+Z_SCALE
 
 
-ROI_DIAMETER = [8,7,4]
-ICY_COLNAMES = {'mean_intensity' : 'Mean Intensity (ch 0)',
-                'xcol' : 'Intensity center X (px) (ch 0)',
-                'ycol' : 'Intensity center Y (px) (ch 0)',
-                'zcol' : 'Intensity center Z (px) (ch 0)'}
-XY_SCALE = 1.19;
-Z_SCALE = 2;
-
-single_session_cell_data_fn = "m{}r{}_{}_output.txt"#output from icy
-cell_data_fn_template = "m{}r{}_{}_output.txt"
-img_fn_template = "m{}r{}_{}.tif"
 
 def calculate_disk(coords, radius, disk_no, img):
     center_z = coords[ICY_COLNAMES['zcol']]+disk_no
@@ -64,16 +54,6 @@ def pixels_to_um(df):
     df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]*Z_SCALE
     return df
 
-def find_overlap(mouse, region, s_idxses, session_order):
-    dfs = dict.fromkeys(s_idxses)
-    imgs = dict.fromkeys(s_idxses)
-    for i in s_idxses:
-        dfs[i] = pd.read_csv(dir_path + cell_data_fn_template
-                             .format(mouse, region, session_order[i]), "\t", header=1)
-        imgs[i] = io.imread(dir_path + img_fn_template
-                             .format(mouse, region, session_order[i])).astype("uint8")
-    #dokonczyc przepisywanie oryginalnego porownania z nb
-    #wektoryzacja
     
 def test_fun(mouse, region, s_idxses, session_order):
     old_method_df = pd.read_csv(dir_path + cell_data_fn_template
@@ -95,11 +75,17 @@ def test_fun(mouse, region, s_idxses, session_order):
     
 res = test_fun(10, 1, [0,1], ["ctx", "landmark1", "landmark2"])
 #%%
+res.sort_values('int2', inplace=True, ascending=False)
 res.sort_values('intensity1', inplace=True, ascending=False)
 #plt.plot(np.array(res['Mean Intensity (ch 0)']))
 plt.plot(np.array(res.intensity1),alpha=0.5)
 plt.plot(np.array(res.int2),alpha=0.5)
-res[res['intensity1'].isna()]['idx2'].to_csv(dir_path+"tail.csv")
+plt.hlines(20, 0, res.shape[0])
+tail = res[(res['intensity1'].isna()) & (res['int2']>30)]
+#plt.plot(np.array(tail.int2))
+#tail.sort_values('int2', inplace=True, ascending=False)
+#plt.plot(np.array(tail.int2))
+tail['idx2'].to_csv(dir_path+"tail.csv")
 #plt.plot(np.array(res['Mean Intensity (ch 0)']))
 #plt.plot(res['Mean Intensity (ch 0)'],alpha=0.5)
 plt.show()
