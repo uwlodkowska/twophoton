@@ -40,12 +40,12 @@ def calculate_intensity(coords, img):
     return sum_int/area_int
 
 
-def filter_unstable_intensity(df, img):
+def standardize_intensityd(df, img):
     df["intensity_standarized"] = calculate_intensity([df[ICY_COLNAMES['xcol']],
                                                                df[ICY_COLNAMES['ycol']],
                                                                df[ICY_COLNAMES['zcol']]],
                                                                img)
-    return df[df['Mean Intensity (ch 0)']/df['intensity_standarized']<=1.5]
+    return df#[df['Mean Intensity (ch 0)']/df['intensity_standarized']<=1.5]
 
 
 def pixels_to_um(df):
