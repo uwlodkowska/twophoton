@@ -10,13 +10,13 @@ from constants import dir_path, FILENAMES
 from skimage import io
 
 def read_single_session_cell_data(mouse, region, sessions):
-    ret = dict.fromkeys(sessions)
+    ret = []
     for s in sessions:
         df = pd.read_csv(dir_path + FILENAMES['cell_data_fn_template']
                              .format(mouse, region, s), "\t", header=1)
         if len(sessions) == 1:
             return df
-        ret[s] = df
+        ret += [df]
     return ret
     
         
