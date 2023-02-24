@@ -10,8 +10,7 @@ import pandas as pd
 from skimage import io
 import matplotlib.pyplot as plt
 
-from constants import dir_path, ICY_COLNAMES, ROI_DIAMETER, FILENAMES, XY_SCALE,
-Z_SCALE
+from constants import dir_path, ICY_COLNAMES, ROI_DIAMETER, FILENAMES, XY_SCALE, Z_SCALE
 
 
 
@@ -40,13 +39,17 @@ def calculate_intensity(coords, img):
     return sum_int/area_int
 
 
-def standardize_intensityd(df, img):
+def standarize_intensityd(df, img):
     df["intensity_standarized"] = calculate_intensity([df[ICY_COLNAMES['xcol']],
                                                                df[ICY_COLNAMES['ycol']],
                                                                df[ICY_COLNAMES['zcol']]],
                                                                img)
     return df#[df['Mean Intensity (ch 0)']/df['intensity_standarized']<=1.5]
 
+
+def find_quantile_threshold(df, img):
+    df = standarize_intensityd(df, img)
+    return df["intensity_standarized"]
 
 def pixels_to_um(df):
     df[ICY_COLNAMES['xcol']] = df[ICY_COLNAMES['xcol']]*XY_SCALE
@@ -56,15 +59,15 @@ def pixels_to_um(df):
 
     
 def test_fun(mouse, region, s_idxses, session_order):
-    old_method_df = pd.read_csv(dir_path + cell_data_fn_template
+    old_method_df = pd.read_csv(dir_path + FILENAMES["cell_data_fn_template"]
                 .format(mouse, region, session_order[s_idxses[1]]+"_"+session_order[s_idxses[0]]))
-    df = pd.read_csv(dir_path + cell_data_fn_template
+    df = pd.read_csv(dir_path + FILENAMES["cell_data_fn_template"]
                      .format(mouse, region, session_order[s_idxses[0]]), "\t", header=1)
 
-    img_ref = io.imread(dir_path + img_fn_template
+    img_ref = io.imread(dir_path + FILENAMES["img_fn_template"]
                     .format(mouse, region, session_order[s_idxses[0]])).astype("uint8")
 
-    img_comp = io.imread(dir_path + img_fn_template
+    img_comp = io.imread(dir_path + FILENAMES["img_fn_template"]
                     .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
     df["int1"] = df.apply(calculate_intensity, img = img_ref, axis = 1)
     df["int2"] = df.apply(calculate_intensity, img = img_comp, axis = 1)
@@ -73,21 +76,5 @@ def test_fun(mouse, region, s_idxses, session_order):
     #plt.plot(joined.intensity2)
     #plt.plot(joined.int1, alpha=0.5)
     
-res = test_fun(10, 1, [0,1], ["ctx", "landmark1", "landmark2"])
-#%%
-res.sort_values('int2', inplace=True, ascending=False)
-res.sort_values('intensity1', inplace=True, ascending=False)
-#plt.plot(np.array(res['Mean Intensity (ch 0)']))
-plt.plot(np.array(res.intensity1),alpha=0.5)
-plt.plot(np.array(res.int2),alpha=0.5)
-plt.hlines(20, 0, res.shape[0])
-tail = res[(res['intensity1'].isna()) & (res['int2']>30)]
-#plt.plot(np.array(tail.int2))
-#tail.sort_values('int2', inplace=True, ascending=False)
-#plt.plot(np.array(tail.int2))
-tail['idx2'].to_csv(dir_path+"tail.csv")
-#plt.plot(np.array(res['Mean Intensity (ch 0)']))
-#plt.plot(res['Mean Intensity (ch 0)'],alpha=0.5)
-plt.show()
-    
+
     
