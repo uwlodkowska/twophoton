@@ -17,7 +17,7 @@ ICY_COLNAMES = {'mean_intensity' : 'Mean Intensity (ch 0)',
 XY_SCALE = 1.19
 Z_SCALE = 2
 
-COORDS_3D = [ICY_COLNAMES['xcol'], ICY_COLNAMES['ycol'], ICY_COLNAMES['zcol']]
+COORDS_3D = [ICY_COLNAMES['zcol'], ICY_COLNAMES['ycol'], ICY_COLNAMES['xcol']]
 
 SCALE = [Z_SCALE, XY_SCALE, XY_SCALE]
 
