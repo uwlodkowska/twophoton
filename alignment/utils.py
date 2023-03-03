@@ -20,6 +20,9 @@ def read_single_session_cell_data(mouse, region, sessions):
     return ret
     
         
-def read_image(mouse, region, session):
+def read_image(mouse, region, session, watershed = False):
+    if watershed:
+        return io.imread(dir_path + FILENAMES['watershed_img_fn_template']
+                         .format(mouse, region, session))
     return io.imread(dir_path + FILENAMES['img_fn_template']
                      .format(mouse, region, session))

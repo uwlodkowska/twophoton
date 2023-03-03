@@ -8,10 +8,8 @@ from skimage.draw import disk
 import numpy as np
 import pandas as pd
 from skimage import io
-import matplotlib.pyplot as plt
-
-from constants import dir_path, ICY_COLNAMES, ROI_DIAMETER, FILENAMES, XY_SCALE, Z_SCALE
-
+from constants import ICY_COLNAMES
+import constants
 
 
 def calculate_disk(coords, radius, disk_no, img):
@@ -24,12 +22,12 @@ def calculate_disk(coords, radius, disk_no, img):
     return [sum_int, area_int]
 
 def calculate_intensity(coords, img):
-    center_coords_df = coords[[ICY_COLNAMES['xcol'], ICY_COLNAMES['ycol'],ICY_COLNAMES['zcol']]]
+    center_coords_df = coords[constants.COORDS_3D]
     center_coords_df = center_coords_df.round().astype(int)
     sum_int = 0
     area_int = 0
     for i in range(-2,3): #going through 5 flat slices making up the 3d cell
-        diameter = ROI_DIAMETER[abs(i)]
+        diameter = constants.ROI_DIAMETER[abs(i)]
         rad = diameter//2
         res = calculate_disk(center_coords_df,rad, i, img)
         sum_int += res[0]
@@ -38,36 +36,60 @@ def calculate_intensity(coords, img):
         return 0
     return sum_int/area_int
 
+def optimize_centroid_position(row, img):
+    current_max = 0
+    best_coords = None
+    for x in range(-constants.TOLERANCE, constants.TOLERANCE+1):
+        for y in range(-constants.TOLERANCE, constants.TOLERANCE+1):
+            for z in range(-1, 2):
+                tst_coords = {
+                    ICY_COLNAMES['xcol'] : int(row[ICY_COLNAMES['xcol']])+x,
+                    ICY_COLNAMES['ycol'] : int(row[ICY_COLNAMES['ycol']])+y,
+                    ICY_COLNAMES['zcol'] : int(row[ICY_COLNAMES['zcol']])+z,
+                    }
+                mean_calculated = calculate_intensity(pd.Series(tst_coords), img)
+                if mean_calculated > current_max:
+                    current_max = mean_calculated
+                    best_coords = [x,y,z]
+    return best_coords, current_max
 
-def standarize_intensityd(df, img):
-    df["intensity_standarized"] = calculate_intensity([df[ICY_COLNAMES['xcol']],
-                                                               df[ICY_COLNAMES['ycol']],
-                                                               df[ICY_COLNAMES['zcol']]],
-                                                               img)
-    return df#[df['Mean Intensity (ch 0)']/df['intensity_standarized']<=1.5]
+def optimize_centroids(df, img, suff=""):
+    for it in df.iterrows():
+        row = it[1]
+        shift, int_optimized = optimize_centroid_position(row, img)
+        row['shift_x'+suff] = shift[0]
+        row['shift_y'+suff] = shift[1]
+        row['shift_z'+suff] = shift[2]
+        row['int_optimized'+suff] = int_optimized
+        df.loc[it[0]] = row
+    
+
+def standarize_intensity(df, img):
+    df["intensity_standarized"] = df.apply(calculate_intensity,img = img, axis = 1)
+    return df[df['Mean Intensity (ch 0)']/df['intensity_standarized']<=1.5]
 
 
 def find_quantile_threshold(df, img):
-    df = standarize_intensityd(df, img)
+    df = standarize_intensity(df, img)
     return df["intensity_standarized"]
 
 def pixels_to_um(df):
-    df[ICY_COLNAMES['xcol']] = df[ICY_COLNAMES['xcol']]*XY_SCALE
-    df[ICY_COLNAMES['ycol']] = df[ICY_COLNAMES['ycol']]*XY_SCALE
-    df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]*Z_SCALE
+    df[ICY_COLNAMES['xcol']] = df[ICY_COLNAMES['xcol']]*constants.XY_SCALE
+    df[ICY_COLNAMES['ycol']] = df[ICY_COLNAMES['ycol']]*constants.XY_SCALE
+    df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]*constants.Z_SCALE
     return df
 
     
 def test_fun(mouse, region, s_idxses, session_order):
-    old_method_df = pd.read_csv(dir_path + FILENAMES["cell_data_fn_template"]
+    old_method_df = pd.read_csv(constants.dir_path + constants.FILENAMES["cell_data_fn_template"]
                 .format(mouse, region, session_order[s_idxses[1]]+"_"+session_order[s_idxses[0]]))
-    df = pd.read_csv(dir_path + FILENAMES["cell_data_fn_template"]
+    df = pd.read_csv(constants.dir_path + constants.FILENAMES["cell_data_fn_template"]
                      .format(mouse, region, session_order[s_idxses[0]]), "\t", header=1)
 
-    img_ref = io.imread(dir_path + FILENAMES["img_fn_template"]
+    img_ref = io.imread(constants.dir_path + constants.FILENAMES["img_fn_template"]
                     .format(mouse, region, session_order[s_idxses[0]])).astype("uint8")
 
-    img_comp = io.imread(dir_path + FILENAMES["img_fn_template"]
+    img_comp = io.imread(constants.dir_path + constants.FILENAMES["img_fn_template"]
                     .format(mouse, region, session_order[s_idxses[1]])).astype("uint8")
     df["int1"] = df.apply(calculate_intensity, img = img_ref, axis = 1)
     df["int2"] = df.apply(calculate_intensity, img = img_comp, axis = 1)

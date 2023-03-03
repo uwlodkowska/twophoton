@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import utils
 import constants
-from cell_preprocessing import calculate_intensity
+import cell_preprocessing as cp
 import visualization
 
 def identify_persistent_cells(mouse, region, session_ids):
@@ -57,12 +57,36 @@ def identify_persistent_cells_w_thresholding(mouse, region, session_ids):
     img = utils.read_image(mouse, region, session_ids[1])
     
     for df in coord_dfs:    
-        df['in_calculated'] = df.apply(calculate_intensity, 
+        df['in_calculated'] = df.apply(cp.calculate_intensity, 
                                                  img = img, axis = 1)
-    threshold = coord_dfs[1]['in_calculated'].quantile(0.2)
+    threshold = coord_dfs[1]['in_calculated'].quantile(0.3)
     persistent_df = coord_dfs[0][coord_dfs[0].in_calculated > threshold]
     
     
     visualization.visualize_with_centroids_custom(img, persistent_df[constants.COORDS_3D])
     return persistent_df
+
+def distribution_change(df, from_column, to_column, step=0.2):
+    number_of_classes = int(1/step)
+    df.loc[:,'dest'] = number_of_classes - 1
+    for i in range(1, number_of_classes):
+        idx = df[df[to_column]<df[to_column].quantile(1-i*step)].index
+        df.loc[idx,'dest'] = number_of_classes - i - 1
+    df_top_from = df[df[from_column]>df[from_column].quantile(1-step)]
+    transfer_rate = np.array([df_top_from[df_top_from['dest'] == i].shape[0] for i in range(number_of_classes)])
+    transfer_rate = transfer_rate/df_top_from.shape[0]
+    return transfer_rate
+
+def distribution_change_all_sessions(mouse, region, sessions):
+    imgs = []
+    for s in sessions:
+        imgs += [utils.read_image(mouse, region, s)]
+    dfs = utils.read_single_session_cell_data(mouse, region, sessions)
     
+    for i in range(len(sessions)-1):
+        df = dfs[i]
+        df['in_calculated'] = df.apply(cp.calculate_intensity,img = imgs[i], axis = 1)
+        df = df[df[constants.ICY_COLNAMES["mean_intensity"]]<1.5*df['in_calculated']]
+        df['in_calculated_n'] = df.apply(cp.calculate_intensity,img = imgs[i+1], axis = 1)
+        tr = distribution_change(df, 'in_calculated', 'in_calculated_n')
+        print(tr)
