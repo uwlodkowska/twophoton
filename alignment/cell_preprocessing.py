@@ -43,9 +43,9 @@ def optimize_centroid_position(row, img):
         for y in range(-constants.TOLERANCE, constants.TOLERANCE+1):
             for z in range(-1, 2):
                 tst_coords = {
-                    ICY_COLNAMES['xcol'] : int(row[ICY_COLNAMES['xcol']])+x,
-                    ICY_COLNAMES['ycol'] : int(row[ICY_COLNAMES['ycol']])+y,
-                    ICY_COLNAMES['zcol'] : int(row[ICY_COLNAMES['zcol']])+z,
+                    ICY_COLNAMES['xcol'] : int(row[ICY_COLNAMES['xcol']].round())+x,
+                    ICY_COLNAMES['ycol'] : int(row[ICY_COLNAMES['ycol']].round())+y,
+                    ICY_COLNAMES['zcol'] : int(row[ICY_COLNAMES['zcol']].round())+z,
                     }
                 mean_calculated = calculate_intensity(pd.Series(tst_coords), img)
                 if mean_calculated > current_max:
@@ -54,6 +54,8 @@ def optimize_centroid_position(row, img):
     return best_coords, current_max
 
 def optimize_centroids(df, img, suff=""):
+    for col in ['shift_x','shift_y','shift_z', 'int_optimized']:
+        df[col+suff] = 0
     for it in df.iterrows():
         row = it[1]
         shift, int_optimized = optimize_centroid_position(row, img)
