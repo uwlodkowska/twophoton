@@ -44,6 +44,5 @@ def plot_histograms(mouse, region, sessions):
 
 
 #%%
-for i in [2,5,8,10, 11,13,14,16]:
-    plot_histograms(i,1,['ctx', 'landmark1', 'landmark2'])
+
         

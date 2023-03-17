@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import cell_preprocessing as cp
 import intersession
+import numpy as np
 #%%
 def optimize_last_session(mouse, region):
     df = utils.read_single_session_cell_data(mouse, region, ['landmark2'])
@@ -27,7 +28,7 @@ def calculate_integrated_int(mouse, region, sessions):
         df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ sessions[i] +"_optimized.csv")
         intensity_sum += [df.int_optimized.sum()]
         intensity_sum_icy += [df[constants.ICY_COLNAMES["mean_intensity"]].sum()]
-    return [intensity_sum_icy]
+    return np.array(intensity_sum)/intensity_sum[0]
 #%%
 def distribution_change_all_sessions(mouse, region, sessions):
     trs = []
@@ -57,10 +58,42 @@ def distribution_change_all_sessions(mouse, region, sessions):
     
 #%%
 all_mice = []
-for i in [5,8,10, 11,13,14,16]:
-    all_mice += calculate_integrated_int(i,1,['ctx', 'landmark1', 'landmark2'])
+for m,r in constants.CTX_REGIONS:
+    all_mice += [calculate_integrated_int(m,r,['ctx', 'landmark1', 'landmark2'])]
 all_mice = np.array(all_mice)   
-    
-for i in range(8):
-    plt.plot(all_mice[i], marker='o')
+plt.title("Integrated intensity CLL")   
+for i, reg in enumerate(all_mice):
+    plt.plot(reg, marker='o', label = str(constants.CTX_REGIONS[i]))
+ax = plt.subplot(111)
+
+
+# Shrink current axis by 20%
+box = ax.get_position()
+ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+# Put a legend to the right of the current axis
+ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+plt.ylim(0,3)
 plt.show()
+print(np.mean(all_mice, axis = 0))
+
+all_mice = []
+for m,r in constants.LANDMARK_REGIONS:
+    all_mice += [calculate_integrated_int(m,r,constants.LANDMARK_FIRST_SESSIONS)]
+all_mice = np.array(all_mice)
+plt.title("Integrated intensity LCC")     
+    
+for i, reg in enumerate(all_mice):
+    plt.plot(reg, marker='o', label = str(constants.CTX_REGIONS[i]))
+ax = plt.subplot(111)
+
+
+# Shrink current axis by 20%
+box = ax.get_position()
+ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+# Put a legend to the right of the current axis
+ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+plt.ylim(0,3)
+plt.show()
+print(np.mean(all_mice, axis = 0))
