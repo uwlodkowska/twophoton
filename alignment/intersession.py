@@ -68,14 +68,45 @@ def identify_persistent_cells_w_thresholding(mouse, region, session_ids):
 
 def distribution_change(df, from_column, to_column, step=0.2):
     number_of_classes = int(1/step)
+    transfer_rate = np.zeros((number_of_classes,number_of_classes))
     df.loc[:,'dest'] = number_of_classes - 1
     for i in range(1, number_of_classes):
         idx = df[df[to_column]<df[to_column].quantile(1-i*step)].index
         df.loc[idx,'dest'] = number_of_classes - i - 1
-    df_top_from = df[df[from_column]>df[from_column].quantile(1-step)]
-    transfer_rate = np.array([df_top_from[df_top_from['dest'] == i].shape[0] for i in range(number_of_classes)])
-    transfer_rate = transfer_rate/df_top_from.shape[0]
+    
+    for i in range(number_of_classes):
+        lower_lim = df[from_column].quantile(i*step)
+        upper_lim = df[from_column].quantile((i+1)*step)
+        df_top_from = df[df[from_column]>lower_lim & df[from_column]<upper_lim]
+        transfer_rate[i] = np.array([df_top_from[df_top_from['dest'] == i].shape[0] for i in range(number_of_classes)])
+    transfer_rate = transfer_rate/df.shape[0]
     return transfer_rate
+
+def assign_type(row):
+    if row.int_optimized1 > row.int_optimized0:
+        if row.int_optimized2 > row.int_optimized1:
+            return'A'
+        else:
+            return 'B'
+    else:
+        if row.int_optimized2 < row.int_optimized1:
+            return 'C'
+        else:
+            return 'D'
+        
+def top_cells_intensity_change(mouse, region, sessions, percentage):
+    top_df = pd.DataFrame(columns=constants.COORDS_3D)
+    for s in sessions:
+        df = cp.get_brightest_cells(mouse, region, s, percentage)
+        top_df =pd.concat([top_df,df], ignore_index=True)
+    for i, s in enumerate(sessions):
+        img = utils.read_image(mouse, region, s)
+        cp.optimize_centroids(top_df, img, str(i))
+
+    top_df['type'] = top_df.apply(assign_type, axis = 1)
+    type_frac = [ top_df[top_df.type== i].shape[0]/top_df.shape[0]  for i in ['A', 'B', 'C', 'D'] ]
+
+    return top_df
 
 def distribution_change_all_sessions(mouse, region, sessions):
     imgs = []

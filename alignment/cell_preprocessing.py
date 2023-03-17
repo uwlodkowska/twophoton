@@ -64,7 +64,13 @@ def optimize_centroids(df, img, suff=""):
         row['shift_z'+suff] = shift[2]
         row['int_optimized'+suff] = int_optimized
         df.loc[it[0]] = row
-    
+
+def get_brightest_cells(mouse, region, session, percentage):
+    df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ 
+                     session +"_optimized.csv")
+    df = df.loc[df.int_optimized > df.int_optimized.quantile(1-percentage)]
+    df = df[constants.COORDS_3D]
+    return df    
 
 def standarize_intensity(df, img):
     df["intensity_standarized"] = df.apply(calculate_intensity,img = img, axis = 1)
