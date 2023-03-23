@@ -46,68 +46,53 @@ def top_cells_intensity_change(mouse, region, sessions, percentage):
     for s in sessions:
         df = get_brightest_cells(mouse, region, s, percentage)
         top_df =pd.concat([top_df,df], ignore_index=True)
+    print(top_df.shape[0])
     for i, s in enumerate(sessions):
         img = utils.read_image(mouse, region, s)
-        cp.optimize_centroids(top_df, img, str(i))
-
-    calculate_r2(top_df, 'int_optimized1', 'int_optimized0')
-    calculate_r2(top_df, 'int_optimized2', 'int_optimized1')
-
-    top_df['type'] = top_df.apply(assign_type, axis = 1)
+        top_df = cp.optimize_centroids(top_df, img, str(i))
+    print(top_df[['int_optimized0', 'int_optimized1', 'int_optimized2']])
     top_df = top_df.drop_duplicates(subset=['int_optimized0', 'int_optimized1', 'int_optimized2'])
-    type_frac = [ top_df[top_df.type== i].shape[0]/top_df.shape[0]  for i in ['A', 'B', 'C', 'D'] ]
+    print(top_df.shape[0])
+    top_df.to_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_top.csv")
+    r2_cl = calculate_r2(top_df, 'int_optimized1', 'int_optimized0')
+    r2_ll = calculate_r2(top_df, 'int_optimized2', 'int_optimized1')
+
+    #top_df['type'] = top_df.apply(assign_type, axis = 1)
+    #type_frac = [ top_df[top_df.type== i].shape[0]/top_df.shape[0]  for i in ['A', 'B', 'C', 'D'] ]
     top_df.sort_values(by='int_optimized1', inplace=True)
     top_df.sort_values(by='int_optimized0', inplace=True)
-    plt.plot(np.array(top_df.int_optimized0))
-    plt.plot(np.array(top_df.int_optimized1), alpha=0.5)
-    plt.title(constants.INTENSITY_PLT.format(mouse, region, 'CL'))
-    plt.savefig(constants.dir_path+constants.INTENSITY_PLT.format(mouse, region, 'CL')+".png")
-    plt.close()
+    # plt.plot(np.array(top_df.int_optimized0))
+    # plt.plot(np.array(top_df.int_optimized1), alpha=0.5)
+    # plt.title(constants.INTENSITY_PLT.format(mouse, region, 'CL'))
+    # plt.savefig(constants.dir_path+constants.INTENSITY_PLT.format(mouse, region, 'CL')+".png")
+    # plt.close()
     top_df.sort_values(by='int_optimized2', inplace=True)
     top_df.sort_values(by='int_optimized1', inplace=True)
-    plt.plot(np.array(top_df.int_optimized1))
-    plt.plot(np.array(top_df.int_optimized2), alpha=0.5)
-    plt.title(constants.INTENSITY_PLT.format(mouse, region, 'LL'))
-    plt.savefig(constants.dir_path+constants.INTENSITY_PLT.format(mouse, region, 'LL')+".png")
-    plt.close()
-    plot_title = constants.INTENSITY_HIST.format(mouse,region)
-    plotting.plot_intensity_change_histogram(np.array(top_df.int_optimized0-top_df.int_optimized1), 
-                                             "C-L",
-                                             np.array(top_df.int_optimized1-top_df.int_optimized2),
-                                             "L-L",
-                                             plot_title)
-    return top_df
+    # plt.plot(np.array(top_df.int_optimized1))
+    # plt.plot(np.array(top_df.int_optimized2), alpha=0.5)
+    # plt.title(constants.INTENSITY_PLT.format(mouse, region, 'LL'))
+    # plt.savefig(constants.dir_path+constants.INTENSITY_PLT.format(mouse, region, 'LL')+".png")
+    # plt.close()
+    # plot_title = constants.INTENSITY_HIST.format(mouse,region)
+    # plotting.plot_intensity_change_histogram(np.array(top_df.int_optimized0-top_df.int_optimized1), 
+    #                                          "C-L",
+    #                                          np.array(top_df.int_optimized1-top_df.int_optimized2),
+    #                                          "L-L",
+    #                                          plot_title)
+    return r2_cl, r2_ll
 
 
-
-#%%
-for m,r in constants.CTX_REGIONS:
-    df = top_cells_intensity_change(m,r,constants.CTX_FIRST_SESSIONS, 0.1)
+    
 
 #%%
-print(len(np.unique(np.array(df.int_optimized0))), df.shape[0])
-print(len(np.unique(np.array(df.int_optimized1))), df.shape[0])
-print(len(np.unique(np.array(df.int_optimized2))), df.shape[0])
-
+r2_arr = []
+for m,r in constants.LANDMARK_REGIONS:
+    r2_vals = top_cells_intensity_change(m,r,constants.LANDMARK_FIRST_SESSIONS, 0.1)
+    r2_arr += [r2_vals]
 #%%
-df_tst = df.drop_duplicates(subset=['int_optimized0', 'int_optimized1', 'int_optimized2'])
-#df.sort_values(by="int_optimized0", inplace=True)
-#df["shifted"] = df["int_optimized0"].shift(-1)
-#%%
-
-plot_title = constants.INTENSITY_HIST.format(10,1)
-plotting.plot_intensity_change_histogram(np.array(df_tst.int_optimized0-df_tst.int_optimized1), 
-                                         "C-L",
-                                         np.array(df_tst.int_optimized1-df_tst.int_optimized2),
-                                         "L-L",
-                                         plot_title)
-#%%
-df_tst.sort_values(by='int_optimized1', inplace=True)
-df_tst.sort_values(by='int_optimized0', inplace=True)
-plt.plot(np.array(df_tst.int_optimized0))
-plt.plot(np.array(df_tst.int_optimized1), alpha=0.5)
+r2_arr = np.array(r2_arr)
+for reg in r2_arr:
+    plt.plot(reg, marker='o')
+plt.title('R2 LCC')
 plt.show()
-df_tst.sort_values(by='int_optimized2', inplace=True)
-df_tst.sort_values(by='int_optimized1', inplace=True)
-plt.plot(np.array(df_tst.int_optimized1))
-plt.plot(np.array(df_tst.int_optimized2), alpha=0.5)
+#%%

@@ -28,7 +28,15 @@ def calculate_integrated_int(mouse, region, sessions):
         df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ sessions[i] +"_optimized.csv")
         intensity_sum += [df.int_optimized.sum()]
         intensity_sum_icy += [df[constants.ICY_COLNAMES["mean_intensity"]].sum()]
-    return np.array(intensity_sum)/intensity_sum[0]
+    return [intensity_sum[i+1]/intensity_sum[i] for i in [0,1]]
+    #return np.array(intensity_sum)/intensity_sum[0]
+
+#%%
+def calculate_integrated_value_by_column(df, columns, title):
+    sum_arr = []
+    for col in columns:
+        sum_arr += [df[col].sum()]
+    return np.array(sum_arr)/sum_arr[0]
 #%%
 def distribution_change_all_sessions(mouse, region, sessions):
     trs = []
@@ -61,9 +69,9 @@ all_mice = []
 for m,r in constants.CTX_REGIONS:
     all_mice += [calculate_integrated_int(m,r,['ctx', 'landmark1', 'landmark2'])]
 all_mice = np.array(all_mice)   
-plt.title("Integrated intensity CLL")   
+plt.title("Integrated int divided by previous session CLL")   
 for i, reg in enumerate(all_mice):
-    plt.plot(reg, marker='o', label = str(constants.CTX_REGIONS[i]))
+    plt.plot(['CL', 'LL'],reg, marker='o', label = str(constants.CTX_REGIONS[i]))
 ax = plt.subplot(111)
 
 
@@ -81,10 +89,10 @@ all_mice = []
 for m,r in constants.LANDMARK_REGIONS:
     all_mice += [calculate_integrated_int(m,r,constants.LANDMARK_FIRST_SESSIONS)]
 all_mice = np.array(all_mice)
-plt.title("Integrated intensity LCC")     
+plt.title("Integrated int divided by previous session LCC")     
     
 for i, reg in enumerate(all_mice):
-    plt.plot(reg, marker='o', label = str(constants.CTX_REGIONS[i]))
+    plt.plot(['LC', 'CC'], reg, marker='o', label = str(constants.LANDMARK_REGIONS[i]))
 ax = plt.subplot(111)
 
 
