@@ -66,6 +66,7 @@ def identify_persistent_cells_w_thresholding(mouse, region, session_ids):
     visualization.visualize_with_centroids_custom(img, persistent_df[constants.COORDS_3D])
     return persistent_df
 
+ 
 def distribution_change(df, from_column, to_column, step=0.2):
     number_of_classes = int(1/step)
     transfer_rate = np.zeros((number_of_classes,number_of_classes))
@@ -77,9 +78,19 @@ def distribution_change(df, from_column, to_column, step=0.2):
     for i in range(number_of_classes):
         lower_lim = df[from_column].quantile(i*step)
         upper_lim = df[from_column].quantile((i+1)*step)
-        df_top_from = df[df[from_column]>lower_lim & df[from_column]<upper_lim]
+        df_top_from = df[(df[from_column]>lower_lim) & (df[from_column]<upper_lim)]
         transfer_rate[i] = np.array([df_top_from[df_top_from['dest'] == i].shape[0] for i in range(number_of_classes)])
     transfer_rate = transfer_rate/df.shape[0]
+    print(transfer_rate)
+    return transfer_rate
+
+def distribution_change_precalculated(df, from_column, to_column, number_of_classes):
+    transfer_rate = np.zeros((number_of_classes,number_of_classes))
+    for i in range(number_of_classes):
+        for j in range(number_of_classes):
+            transfer_rate[i,j] = df.loc[((df[from_column] == i)&(df[to_column] == j))].shape[0]
+    transfer_rate = transfer_rate/df.shape[0]
+    print(transfer_rate)
     return transfer_rate
 
 def assign_type(row):

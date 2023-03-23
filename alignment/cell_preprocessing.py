@@ -35,8 +35,8 @@ def calculate_intensity(coords, img):
     if area_int == 0:
         return 0
     return sum_int/area_int
-
-def optimize_centroid_position(row, img):
+ 
+def optimize_centroid_position(row, img, suff):
     current_max = 0
     best_coords = None
     for x in range(-constants.TOLERANCE, constants.TOLERANCE+1):
@@ -51,26 +51,17 @@ def optimize_centroid_position(row, img):
                 if mean_calculated > current_max:
                     current_max = mean_calculated
                     best_coords = [x,y,z]
-    return best_coords, current_max
+    row['shift_x'+suff] = best_coords[0]
+    row['shift_y'+suff] = best_coords[1]
+    row['shift_z'+suff] = best_coords[2]
+    row['int_optimized'+suff] = current_max
+    return row
 
 def optimize_centroids(df, img, suff=""):
     for col in ['shift_x','shift_y','shift_z', 'int_optimized']:
         df[col+suff] = 0
-    for it in df.iterrows():
-        row = it[1]
-        shift, int_optimized = optimize_centroid_position(row, img)
-        row['shift_x'+suff] = shift[0]
-        row['shift_y'+suff] = shift[1]
-        row['shift_z'+suff] = shift[2]
-        row['int_optimized'+suff] = int_optimized
-        df.loc[it[0]] = row
-
-def get_brightest_cells(mouse, region, session, percentage):
-    df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ 
-                     session +"_optimized.csv")
-    df = df.loc[df.int_optimized > df.int_optimized.quantile(1-percentage)]
-    df = df[constants.COORDS_3D]
-    return df    
+    df = df.apply(optimize_centroid_position,img =img, suff=suff, axis=1)
+    return df
 
 def standarize_intensity(df, img):
     df["intensity_standarized"] = df.apply(calculate_intensity,img = img, axis = 1)
