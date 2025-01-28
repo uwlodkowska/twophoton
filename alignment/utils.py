@@ -14,7 +14,7 @@ import math
 def read_single_session_cell_data(mouse, region, sessions):
     ret = []
     for s in sessions:
-        df = pd.read_csv(constants.dir_path + constants.FILENAMES['cell_data_fn_template']
+        df = pd.read_csv(constants.path_for_icy + constants.FILENAMES['cell_data_fn_template']
                              .format(mouse, region, s), "\t", header=1)
         if len(sessions) == 1:
             return df
@@ -26,7 +26,11 @@ def read_image(mouse, region, session, watershed = False):
     if watershed:
         return io.imread(constants.dir_path + constants.FILENAMES['watershed_img_fn_template']
                          .format(mouse, region, session))
-    return io.imread(constants.dir_path + constants.FILENAMES['img_fn_template']
+    '''
+    print("img path", constants.path_for_icy + constants.FILENAMES['img_fn_template']
+                     .format(mouse, region, session))
+    '''
+    return io.imread(constants.path_for_icy + constants.FILENAMES['img_fn_template']
                      .format(mouse, region, session))
 
 def top_intensity_from_file(mouse, region):
@@ -36,4 +40,10 @@ def top_intensity_from_file(mouse, region):
 def assign_quantile(df, colname, step=0.2):
     df[colname+"_q"] = (df[colname].rank(pct=True)/step).apply(math.floor)
     df.loc[df[colname]==math.floor(1/step)] = math.floor(1/step)-1
+    
+def read_behav_data():
+    return pd.read_excel(constants.BEHAV_DIR, sheet_name="summary",header=0, index_col=1)
+
+
+    
     

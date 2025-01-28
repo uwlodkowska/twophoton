@@ -12,21 +12,50 @@ import constants
 import cell_preprocessing as cp
 import visualization
 
-def identify_persistent_cells(mouse, region, session_ids):
+def identify_persistent_cells(mouse, region, sessions, session_ids):
     #tu dodac standaryzacje intensity?
-    sessions = utils.read_single_session_cell_data(
+    if sessions is None:
+        sessions = utils.read_single_session_cell_data(
                                   mouse, region, session_ids)
+    cell_count = 0
     for i, s in enumerate(sessions):
+        cell_count += s.shape[0]
         sessions[i] = s[constants.COORDS_3D].reset_index()
+    print("summed ", sessions[0].shape[0]+sessions[1].shape[0])
+        
+    
     cross_prod = sessions[0].merge(sessions[1], how = "cross", suffixes=("_s1", "_s2"))
     cross_prod['distance'] = np.linalg.norm(cross_prod[[n+"_s1" for n in constants.COORDS_3D]].values
                                             -cross_prod[[n+"_s2" for n in constants.COORDS_3D]].values, axis=1)
     cross_prod = cross_prod[cross_prod.distance < constants.TOLERANCE]
+    cross_prod = cross_prod.sort_values(by='distance', ascending=True)
+    cross_prod = cross_prod.drop_duplicates(subset=["index_s2"]).drop_duplicates(subset=["index_s1"])
+    
+    for cname in constants.COORDS_3D:
+        cross_prod[cname] = (cross_prod[cname+"_s1"]+cross_prod[cname+"_s2"])/2
+        cross_prod = cross_prod.drop(columns = [cname+"_s1",cname+"_s2"])
+    
+    print("duplicates ", cross_prod.shape[0])
+    #print(np.array(cross_prod.index_s1))
+    
+    sessions[0] = sessions[0].drop(np.array(cross_prod.index_s1))
+    summed = pd.concat(sessions)
+    print("summed ", summed.shape[0])
+    print("duplicates removed ", summed.shape[0])
+    cross_prod = cross_prod.drop(columns = ["index_s1","index_s2", "distance"])
+    count = cross_prod.shape[0]/(cell_count-cross_prod.shape[0])
+    return summed, count 
 
-    return cross_prod
 
-# identify_persistent_cells(10,1, utils.read_single_session_cell_data(
-#                               10, 1, constants.CTX_FIRST_SESSIONS[:2]))
+def pooled_cells(mouse, region, session_ids):
+    sessions = utils.read_single_session_cell_data(
+                                  mouse, region, session_ids)
+    persistent, count = identify_persistent_cells(mouse, region, sessions[:2], [])
+    print("first ct ", count)
+    pooled, count = identify_persistent_cells(mouse, region, [persistent,sessions[-1]], [])
+    print("second ct ",count)
+    return pooled
+
 
 
 def identify_persistent_cells_w_thresholding(mouse, region, session_ids):
@@ -52,19 +81,34 @@ def identify_persistent_cells_w_thresholding(mouse, region, session_ids):
     is a cell there
 
     """
+    quantile_thre = 0
+    
     coord_dfs = utils.read_single_session_cell_data(
                                   mouse, region, session_ids)
-    img = utils.read_image(mouse, region, session_ids[1])
+    imgs = [utils.read_image(mouse, region, session_ids[0]), 
+            utils.read_image(mouse, region, session_ids[1])]
     
-    for df in coord_dfs:    
+    over_thre_count = np.array([0,0])
+    thre=[0,0]
+    for idx, df in enumerate(coord_dfs): 
         df['in_calculated'] = df.apply(cp.calculate_intensity, 
-                                                 img = img, axis = 1)
-    threshold = coord_dfs[1]['in_calculated'].quantile(0.3)
-    persistent_df = coord_dfs[0][coord_dfs[0].in_calculated > threshold]
+                                                 img = imgs[idx], axis = 1)
+        
+        thre[idx] = df['in_calculated'].quantile(quantile_thre)
+        over_thre_count[idx] = df.loc[df.in_calculated > thre[idx]].shape[0]
     
+    #threshold = coord_dfs[1]['in_calculated'].quantile(quantile_thre)
     
-    visualization.visualize_with_centroids_custom(img, persistent_df[constants.COORDS_3D])
-    return persistent_df
+    coord_dfs[0]['in_calculated'] = coord_dfs[0].apply(cp.calculate_intensity, 
+                                                 img = imgs[1], axis = 1)
+    
+    coord_dfs[0] = cp.optimize_centroids(coord_dfs[0], imgs[1])
+    
+    persistent_df = coord_dfs[0].loc[coord_dfs[0].int_optimized > thre[1]]
+    print('summary ', persistent_df.shape[0], over_thre_count)
+    overlap_size = persistent_df.shape[0]/(np.sum(over_thre_count)-persistent_df.shape[0])
+    #visualization.visualize_with_centroids_custom(imgs[0], persistent_df[constants.COORDS_3D])
+    return overlap_size, persistent_df
 
  
 def distribution_change(df, from_column, to_column, step=0.2):
@@ -95,12 +139,12 @@ def distribution_change_precalculated(df, from_column, to_column, number_of_clas
 
 def assign_type(row):
     if row.int_optimized1 > row.int_optimized0:
-        if row.int_optimized2 > row.int_optimized1:
+        if row.int_optimized2 > row.int_optimized0:
             return'A'
         else:
             return 'B'
     else:
-        if row.int_optimized2 < row.int_optimized1:
+        if row.int_optimized0 < row.int_optimized2:
             return 'C'
         else:
             return 'D'
@@ -117,7 +161,7 @@ def top_cells_intensity_change(mouse, region, sessions, percentage):
     top_df['type'] = top_df.apply(assign_type, axis = 1)
     type_frac = [ top_df[top_df.type== i].shape[0]/top_df.shape[0]  for i in ['A', 'B', 'C', 'D'] ]
 
-    return top_df
+    return type_frac
 
 def distribution_change_all_sessions(mouse, region, sessions):
     imgs = []
@@ -132,3 +176,19 @@ def distribution_change_all_sessions(mouse, region, sessions):
         df['in_calculated_n'] = df.apply(cp.calculate_intensity,img = imgs[i+1], axis = 1)
         tr = distribution_change(df, 'in_calculated', 'in_calculated_n')
         print(tr)
+        
+        
+def find_intersession_tendencies(df, sessions=[1,2,3], colname='int_optimized'):
+    tendencies = []
+    for i in range(len(sessions)-1):
+        df[colname+str(sessions[i])+'_low'] = df.int_optimized0*0.8
+        df[colname+str(sessions[i])+'_high'] = df.int_optimized0*1.2
+        
+        condition_down = df[colname+str(sessions[i+1])] < df[colname+str(sessions[i])+'_low']
+        condition_up = df[colname+str(sessions[i+1])] > df[colname+str(sessions[i])+'_high']
+        down = df.loc[condition_down]
+        stable = df.loc[ (~condition_down) & (~condition_up)]
+        up = df.loc[condition_up]
+        print("up: ", up.shape[0],"down: ", down.shape[0],"stable: ", stable.shape[0])
+        tendencies += [up.shape[0], down.shape[0], stable.shape[0]]
+    return tendencies

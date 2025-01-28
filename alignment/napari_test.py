@@ -11,7 +11,7 @@ import napari
 
 cells = utils.read_image(10, 1, "ctx")
 viewer = napari.view_image(
-        cells, ndisplay=3, scale=constants.SCALE#, channel_axis=1, name=['membranes', 'nuclei']
+        cells, ndisplay=3, scale=constants.SCALE, channel_axis=1, name=['membranes', 'nuclei']
         )
 
 centroids_df = utils.read_single_session_cell_data(10, 1, ["ctx"])
@@ -21,7 +21,6 @@ pts = centroids_df[[constants.ICY_COLNAMES['zcol'], constants.ICY_COLNAMES['ycol
 pts_layer = viewer.add_points(
     pts,
     size=1,
-    face_color=
     shading='spherical',
     scale=constants.SCALE,
     edge_width=0,

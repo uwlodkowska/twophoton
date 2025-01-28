@@ -12,23 +12,29 @@ import pandas as pd
 import cell_preprocessing as cp
 import intersession
 import numpy as np
+from scipy.stats.stats import pearsonr
 #%%
-def optimize_last_session(mouse, region):
-    df = utils.read_single_session_cell_data(mouse, region, ['landmark2'])
-    img = utils.read_image(mouse, region, 'landmark2')
+def optimize_last_session(mouse, region, session_code):
+    df = utils.read_single_session_cell_data(mouse, region, [session_code])
+    img = utils.read_image(mouse, region, session_code)
     df['in_calculated'] = df.apply(cp.calculate_intensity,img = img, axis = 1)
     df = df[df[constants.ICY_COLNAMES["mean_intensity"]]<1.5*df['in_calculated']]
-    cp.optimize_centroids(df, img)
-    df.to_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_landmark2_optimized.csv")
+    df = cp.optimize_centroids(df, img)
+    df.to_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+session_code+"_optimized.csv")
 #%%
 def calculate_integrated_int(mouse, region, sessions):
     intensity_sum_icy = []
     intensity_sum = []
+    df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_top.csv")
     for i in range(len(sessions)):
-        df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ sessions[i] +"_optimized.csv")
-        intensity_sum += [df.int_optimized.sum()]
-        intensity_sum_icy += [df[constants.ICY_COLNAMES["mean_intensity"]].sum()]
-    return [intensity_sum[i+1]/intensity_sum[i] for i in [0,1]]
+        #df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ sessions[i] +"_optimized_n.csv")
+        df['lower_lim'] = df.int_optimized*0.8
+        df['upper_lim'] = df.int_optimized*1.2
+        increase = df[df.int_optimized_n>df.upper_lim]
+        decrease = df[df.int_optimized_n<df.lower_lim]
+        intensity_sum += [1-(increase.shape[0]+decrease.shape[0])/df.shape[0]]
+        #intensity_sum_icy += [df[constants.ICY_COLNAMES["mean_intensity"]].sum()]
+    return np.array([intensity_sum[i] for i in [0,1]])
     #return np.array(intensity_sum)/intensity_sum[0]
 
 #%%
@@ -65,15 +71,28 @@ def distribution_change_all_sessions(mouse, region, sessions):
     return trs
     
 #%%
-all_mice = []
-for m,r in constants.CTX_REGIONS:
-    all_mice += [calculate_integrated_int(m,r,['ctx', 'landmark1', 'landmark2'])]
-all_mice = np.array(all_mice)   
-plt.title("Integrated int divided by previous session CLL")   
-for i, reg in enumerate(all_mice):
-    plt.plot(['CL', 'LL'],reg, marker='o', label = str(constants.CTX_REGIONS[i]))
-ax = plt.subplot(111)
+all_mice = pd.DataFrame(columns = ['int', 'behav'])
+behav = utils.read_behav_data()
+for m,r in constants.CTX_REGIONS:    
+    performance = behav.loc[m, 'ctx_avg']
+    all_mice.loc[len(all_mice)] = np.append([calculate_integrated_int(m,r,constants.CTX_FIRST_SESSIONS)[1]],
+                          performance)
+# for m,r in constants.LANDMARK_REGIONS:    
+#     performance = behav.loc[m, 'landmark_avg']
+#     all_mice.loc[len(all_mice)] = np.append(calculate_integrated_int(m,r,constants.LANDMARK_FIRST_SESSIONS)[1],
+#                           performance)
+plt.scatter(all_mice.behav, all_mice.int)
+plt.title("Success rate vs fraction of stable cells from L1 to L2")
+plt.ylabel("Stable cells") 
+plt.xlabel("Ctx score")
+plt.show() 
+pearsonr(all_mice.behav, all_mice.int)
+#%%
 
+plt.title("Integrated int CLL")   
+for i, reg in enumerate(all_mice):
+    plt.plot(['C', 'L1', 'L2'],reg, marker='o', label = str(constants.CTX_REGIONS[i]))
+ax = plt.subplot(111)
 
 # Shrink current axis by 20%
 box = ax.get_position()
@@ -89,10 +108,10 @@ all_mice = []
 for m,r in constants.LANDMARK_REGIONS:
     all_mice += [calculate_integrated_int(m,r,constants.LANDMARK_FIRST_SESSIONS)]
 all_mice = np.array(all_mice)
-plt.title("Integrated int divided by previous session LCC")     
+plt.title("Integrated int LCC")     
     
 for i, reg in enumerate(all_mice):
-    plt.plot(['LC', 'CC'], reg, marker='o', label = str(constants.LANDMARK_REGIONS[i]))
+    plt.plot(['L', 'C1', 'C2'], reg, marker='o', label = str(constants.LANDMARK_REGIONS[i]))
 ax = plt.subplot(111)
 
 

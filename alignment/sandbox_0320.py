@@ -19,7 +19,7 @@ def top_intensity_from_file(mouse, region):
     return top_df
 
 def assign_quantile(df, colname, step=0.2):
-    df[colname+"_q"] = (df[colname].rank(pct=True)/step).apply(math.floor)
+    df[colname+"_q"] = (df[colname].rank(pct=True)/step)#.apply(math.floor)
     df.loc[df[colname]==math.floor(1/step)] = math.floor(1/step)-1
     
 def show_transfer_rate_heatmaps(df, from_col, to_col, title):
@@ -37,25 +37,29 @@ for m,r in constants.CTX_REGIONS:
     for i in range(3):
         assign_quantile(df, 'int_optimized'+str(i))
         df.loc[df["int_optimized"+str(i)+"_q"]==5] = 4
+    plt.scatter(df.int_optimized0, df.int_optimized1, s=1)
+    plt.scatter(df.int_optimized1, df.int_optimized2, s=1)
+    plt.show()
+        
+#%%        
 
-    df_filtered = df.loc[((df.int_optimized0_q != df.int_optimized1_q) | (df.int_optimized1_q != df.int_optimized2_q))]
+df_filtered = df.loc[((df.int_optimized0_q != df.int_optimized1_q) | (df.int_optimized1_q != df.int_optimized2_q))]
 
     
-    title_pre = "m{}r{}".format(m,r)
-    nbins = 50
-    histrange=(-175, 175)
+title_pre = "m{}r{}".format(m,r)
+nbins = 50
+histrange=(-175, 175)
+diff_arr1 = np.array(df_filtered.int_optimized0-df_filtered.int_optimized1)
+diff_arr2 = np.array(df_filtered.int_optimized1-df_filtered.int_optimized2)
     
-    diff_arr1 = np.array(df_filtered.int_optimized0-df_filtered.int_optimized1)
-    diff_arr2 = np.array(df_filtered.int_optimized1-df_filtered.int_optimized2)
+df01 = df.loc[(df.int_optimized0_q == df.int_optimized1_q)]
+df12 = df.loc[(df.int_optimized2_q == df.int_optimized1_q)]
     
-    df01 = df.loc[(df.int_optimized0_q == df.int_optimized1_q)]
-    df12 = df.loc[(df.int_optimized2_q == df.int_optimized1_q)]
+df01_arr = [df01.loc[df01.int_optimized0_q==i].shape[0]/df01.shape[0] for i in range(5)]
+df12_arr = [df12.loc[df12.int_optimized1_q==i].shape[0]/df12.shape[0] for i in range(5)]
     
-    df01_arr = [df01.loc[df01.int_optimized0_q==i].shape[0]/df01.shape[0] for i in range(5)]
-    df12_arr = [df12.loc[df12.int_optimized1_q==i].shape[0]/df12.shape[0] for i in range(5)]
-    
-    df01_all += [df01_arr]
-    df12_all += [df12_arr]
+df01_all += [df01_arr]
+df12_all += [df12_arr]
     
 bwidth = 0.25   
 br1 = np.arange(5)

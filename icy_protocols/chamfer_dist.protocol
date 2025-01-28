@@ -21,7 +21,7 @@
 <variable ID="Spot to detect" name="Spot to detect" runtime="false" value="BRIGHT_SPOT" visible="true"/>
 <variable ID="input Sequence ROIs" name="ROIs from sequence for WAT" runtime="false" value="No Sequence" visible="true"/>
 <variable ID="Compute WAT considering ROI" name="Compute WAT considering ROI" runtime="false" value="false" visible="true"/>
-<variable ID="ROIs for detection mask" name="ROIs for detection mask" runtime="false" value="" visible="true"/>
+<variable ID="ROIs for detection mask" name="ROIs for detection mask" runtime="false" value="No ROI" visible="true"/>
 <variable ID="Scale 1" name="Scale 1" runtime="false" value="false" visible="true"/>
 <variable ID="Scale 2" name="Scale 2" runtime="false" value="false" visible="true"/>
 <variable ID="Scale 3" name="Scale 3" runtime="false" value="true" visible="true"/>
@@ -192,10 +192,10 @@
 <variable ID="1311159216:input" blockID="1311159216" value="" visible="true"/>
 <variable ID="1311159216:Separator" blockID="1311159216" value="_" visible="false"/>
 <variable ID="1311159216:Suffix" blockID="1311159216" value="spots" visible="false"/>
-<variable ID="418684451:text" blockID="418684451" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots" visible="false"/>
-<variable ID="1350103216:input path" blockID="1350103216" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots" visible="false"/>
+<variable ID="418684451:text" blockID="418684451" value="" visible="false"/>
+<variable ID="1350103216:input path" blockID="1350103216" value="" visible="false"/>
 <variable ID="1098025557:file" blockID="1098025557" value="" visible="false"/>
-<variable ID="1098025557:sequence" blockID="1098025557" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots.tif" visible="true"/>
+<variable ID="1098025557:sequence" blockID="1098025557" value="No Sequence" visible="true"/>
 <variable ID="1098025557:format" blockID="1098025557" value="TIFF" visible="false"/>
 <variable ID="1098025557:overwrite" blockID="1098025557" value="true" visible="false"/>
 <variable ID="1098025557:multiple file" blockID="1098025557" value="false" visible="false"/>
@@ -296,10 +296,10 @@
 <variable ID="374971700:input" blockID="374971700" value="" visible="true"/>
 <variable ID="374971700:Separator" blockID="374971700" value="_" visible="false"/>
 <variable ID="374971700:Suffix" blockID="374971700" value="dist_map" visible="false"/>
-<variable ID="998849133:text" blockID="998849133" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map" visible="false"/>
-<variable ID="140196919:input path" blockID="140196919" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map" visible="false"/>
+<variable ID="998849133:text" blockID="998849133" value="" visible="false"/>
+<variable ID="140196919:input path" blockID="140196919" value="" visible="false"/>
 <variable ID="1462746574:file" blockID="1462746574" value="" visible="false"/>
-<variable ID="1462746574:sequence" blockID="1462746574" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map.tif" visible="true"/>
+<variable ID="1462746574:sequence" blockID="1462746574" value="No Sequence" visible="true"/>
 <variable ID="1462746574:format" blockID="1462746574" value="TIFF" visible="false"/>
 <variable ID="1462746574:overwrite" blockID="1462746574" value="true" visible="false"/>
 <variable ID="1462746574:multiple file" blockID="1462746574" value="false" visible="false"/>
@@ -375,10 +375,10 @@
 <variable ID="1579365898:input" blockID="1579365898" value="" visible="true"/>
 <variable ID="1579365898:Separator" blockID="1579365898" value="_" visible="false"/>
 <variable ID="1579365898:Suffix" blockID="1579365898" value="watershed" visible="false"/>
-<variable ID="183063429:text" blockID="183063429" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed" visible="false"/>
-<variable ID="760207813:input path" blockID="760207813" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed" visible="false"/>
+<variable ID="183063429:text" blockID="183063429" value="" visible="false"/>
+<variable ID="760207813:input path" blockID="760207813" value="" visible="false"/>
 <variable ID="1525483621:file" blockID="1525483621" value="" visible="false"/>
-<variable ID="1525483621:sequence" blockID="1525483621" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed.tif" visible="true"/>
+<variable ID="1525483621:sequence" blockID="1525483621" value="No Sequence" visible="true"/>
 <variable ID="1525483621:format" blockID="1525483621" value="TIFF" visible="false"/>
 <variable ID="1525483621:overwrite" blockID="1525483621" value="true" visible="false"/>
 <variable ID="1525483621:multiple file" blockID="1525483621" value="false" visible="false"/>
@@ -582,10 +582,10 @@
 <variable ID="1633855782:input" blockID="1633855782" value="" visible="true"/>
 <variable ID="1633855782:Separator" blockID="1633855782" value="_" visible="false"/>
 <variable ID="1633855782:Suffix" blockID="1633855782" value="local_max" visible="false"/>
-<variable ID="190654452:text" blockID="190654452" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max" visible="false"/>
-<variable ID="1257476912:input path" blockID="1257476912" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max" visible="false"/>
+<variable ID="190654452:text" blockID="190654452" value="" visible="false"/>
+<variable ID="1257476912:input path" blockID="1257476912" value="" visible="false"/>
 <variable ID="2055572063:file" blockID="2055572063" value="" visible="false"/>
-<variable ID="2055572063:sequence" blockID="2055572063" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max.tif" visible="true"/>
+<variable ID="2055572063:sequence" blockID="2055572063" value="No Sequence" visible="true"/>
 <variable ID="2055572063:format" blockID="2055572063" value="TIFF" visible="false"/>
 <variable ID="2055572063:overwrite" blockID="2055572063" value="true" visible="false"/>
 <variable ID="2055572063:multiple file" blockID="2055572063" value="false" visible="false"/>
@@ -653,6 +653,7 @@
 <links>
 <link dstBlockID="425459673" dstVarID="sequence" srcBlockID="361489121" srcVarID="Sequence"/>
 <link dstBlockID="399285998" dstVarID="input Sequence" srcBlockID="425459673" srcVarID="sequence"/>
+<link dstBlockID="863722775" dstVarID="Sequence" srcBlockID="425459673" srcVarID="sequence"/>
 <link dstBlockID="958713872" dstVarID="sequence" srcBlockID="399285998" srcVarID="input Sequence"/>
 <link dstBlockID="613985639" dstVarID="1098025557:sequence" srcBlockID="399285998" srcVarID="binary Spot Sequence"/>
 <link dstBlockID="13049480" dstVarID="sequence" srcBlockID="399285998" srcVarID="input Sequence"/>
@@ -674,8 +675,10 @@
 <link dstBlockID="613985639" dstVarID="1311159216:input" srcBlockID="958713872" srcVarID="name"/>
 <link dstBlockID="921738698" dstVarID="374971700:input" srcBlockID="958713872" srcVarID="name"/>
 <link dstBlockID="1878365959" dstVarID="input" srcBlockID="958713872" srcVarID="name"/>
+<link dstBlockID="1857899903" dstVarID="input" srcBlockID="958713872" srcVarID="name"/>
 <link dstBlockID="1525213471" dstVarID="roi" srcBlockID="1310142354" srcVarID="ROI"/>
 <link dstBlockID="950973258" dstVarID="Regions of interest" srcBlockID="1525213471" srcVarID="out"/>
+<link dstBlockID="863722775" dstVarID="Regions of interest" srcBlockID="1525213471" srcVarID="out"/>
 <link dstBlockID="2083066488" dstVarID="Suffix" srcBlockID="603024548" srcVarID="text"/>
 <link dstBlockID="2083066488" dstVarID="input" srcBlockID="1264388200" srcVarID="Folder"/>
 <link dstBlockID="1102776919" dstVarID="input" srcBlockID="2083066488" srcVarID="output"/>
@@ -687,29 +690,26 @@
 <link dstBlockID="1878365959" dstVarID="Suffix" srcBlockID="422371342" srcVarID="text"/>
 <link dstBlockID="1729562892" dstVarID="input path" srcBlockID="1878365959" srcVarID="output"/>
 <link dstBlockID="245859983" dstVarID="output file" srcBlockID="1729562892" srcVarID="output file"/>
-<link dstBlockID="863722775" dstVarID="Regions of interest" srcBlockID="1525213471" srcVarID="out"/>
-<link dstBlockID="2129161382" dstVarID="workbook" srcBlockID="863722775" srcVarID="Workbook"/>
-<link dstBlockID="1857899903" dstVarID="input" srcBlockID="958713872" srcVarID="name"/>
 <link dstBlockID="1857899903" dstVarID="Suffix" srcBlockID="668854659" srcVarID="text"/>
 <link dstBlockID="1511913417" dstVarID="input path" srcBlockID="1857899903" srcVarID="output"/>
 <link dstBlockID="2129161382" dstVarID="output file" srcBlockID="1511913417" srcVarID="output file"/>
-<link dstBlockID="863722775" dstVarID="Sequence" srcBlockID="425459673" srcVarID="sequence"/>
+<link dstBlockID="2129161382" dstVarID="workbook" srcBlockID="863722775" srcVarID="Workbook"/>
 </links>
 <variables>
 <input>
-<variable ID="folder" blockID="361489121" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle" visible="true"/>
+<variable ID="folder" blockID="361489121" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/fos_gfp_tmaze2/sca_tifs/base/ready_to_process/despeckle/new_icy" visible="true"/>
 <variable ID="extension" blockID="361489121" value="tif" visible="true"/>
 <variable ID="Include sub-folders" blockID="361489121" value="false" visible="true"/>
-<variable ID="425459673:sequence" blockID="425459673" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
+<variable ID="425459673:sequence" blockID="425459673" value="No Sequence" visible="false"/>
 <variable ID="425459673:PxSize X (µm)" blockID="425459673" value="1.19" visible="false"/>
 <variable ID="425459673:PxSize Y (µm)" blockID="425459673" value="1.19" visible="false"/>
 <variable ID="425459673:PxSize Z (µm)" blockID="425459673" value="2.0" visible="false"/>
 <variable ID="425459673:Time interval T (s)" blockID="425459673" value="1.0" visible="false"/>
-<variable ID="399285998:input Sequence" blockID="399285998" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
+<variable ID="399285998:input Sequence" blockID="399285998" value="No Sequence" visible="false"/>
 <variable ID="399285998:Spot to detect" blockID="399285998" value="BRIGHT_SPOT" visible="false"/>
 <variable ID="399285998:input Sequence ROIs" blockID="399285998" value="No Sequence" visible="false"/>
 <variable ID="399285998:Compute WAT considering ROI" blockID="399285998" value="false" visible="false"/>
-<variable ID="399285998:ROIs for detection mask" blockID="399285998" value="" visible="false"/>
+<variable ID="399285998:ROIs for detection mask" blockID="399285998" value="No ROI" visible="false"/>
 <variable ID="399285998:Scale 1" blockID="399285998" value="false" visible="false"/>
 <variable ID="399285998:Scale 2" blockID="399285998" value="false" visible="false"/>
 <variable ID="399285998:Scale 3" blockID="399285998" value="true" visible="false"/>
@@ -721,49 +721,49 @@
 <variable ID="399285998:Th. scale 4:" blockID="399285998" value="100" visible="false"/>
 <variable ID="399285998:Th. scale 5:" blockID="399285998" value="100" visible="false"/>
 <variable ID="399285998:Force 2D Wavelets" blockID="399285998" value="false" visible="false"/>
-<variable ID="1545581468:sequence" blockID="1545581468" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots.tif" visible="false"/>
-<variable ID="1545581468:rois(s)" blockID="1545581468" value="1905 ROI" visible="false"/>
+<variable ID="1545581468:sequence" blockID="1545581468" value="No Sequence" visible="false"/>
+<variable ID="1545581468:rois(s)" blockID="1545581468" value="No ROI" visible="false"/>
 <variable ID="1545581468:remove" blockID="1545581468" value="false" visible="false"/>
-<variable ID="853341127:sequence" blockID="853341127" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots.tif" visible="false"/>
+<variable ID="853341127:sequence" blockID="853341127" value="No Sequence" visible="false"/>
 <variable ID="853341127:PxSize X (µm)" blockID="853341127" value="1.19" visible="false"/>
 <variable ID="853341127:PxSize Y (µm)" blockID="853341127" value="1.19" visible="false"/>
 <variable ID="853341127:PxSize Z (µm)" blockID="853341127" value="4.0" visible="false"/>
 <variable ID="853341127:Time interval T (s)" blockID="853341127" value="100.0" visible="false"/>
-<variable ID="856197853:Use ROI from" blockID="856197853" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots.tif" visible="false"/>
+<variable ID="856197853:Use ROI from" blockID="856197853" value="No Sequence" visible="false"/>
 <variable ID="856197853:Algorithm" blockID="856197853" value="plugins.adufour.distancetransforms.Saito" visible="false"/>
 <variable ID="856197853:Invert map" blockID="856197853" value="false" visible="false"/>
 <variable ID="856197853:Real units" blockID="856197853" value="true" visible="false"/>
-<variable ID="1184371089:input sequence" blockID="1184371089" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map.tif" visible="false"/>
+<variable ID="1184371089:input sequence" blockID="1184371089" value="No Sequence" visible="false"/>
 <variable ID="1184371089:filter" blockID="1184371089" value="plugins.adufour.filtering.LocalMax" visible="false"/>
 <variable ID="1184371089:filter radius (X)" blockID="1184371089" value="2" visible="false"/>
 <variable ID="1184371089:filter radius (Y)" blockID="1184371089" value="2" visible="false"/>
 <variable ID="1184371089:filter radius (Z)" blockID="1184371089" value="2" visible="false"/>
-<variable ID="718260828:sequence" blockID="718260828" value="no name034_LocalMax" visible="false"/>
+<variable ID="718260828:sequence" blockID="718260828" value="No Sequence" visible="false"/>
 <variable ID="718260828:Type Wanted" blockID="718260828" value="UBYTE" visible="false"/>
 <variable ID="718260828:Rescale" blockID="718260828" value="true" visible="false"/>
-<variable ID="1664075942:Signal" blockID="1664075942" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map.tif" visible="false"/>
-<variable ID="1664075942:Seeds" blockID="1664075942" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max.tif" visible="false"/>
+<variable ID="1664075942:Signal" blockID="1664075942" value="No Sequence" visible="false"/>
+<variable ID="1664075942:Seeds" blockID="1664075942" value="No Sequence" visible="false"/>
 <variable ID="1664075942:Threshold Signal" blockID="1664075942" value="0.0" visible="false"/>
 <variable ID="1664075942:Threshold seeds" blockID="1664075942" value="0.0" visible="false"/>
 <variable ID="1664075942:Radius" blockID="1664075942" value="4.0" visible="false"/>
-<variable ID="958713872:sequence" blockID="958713872" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
+<variable ID="958713872:sequence" blockID="958713872" value="No Sequence" visible="false"/>
 <variable ID="958713872:folder" blockID="958713872" value="true" visible="false"/>
 <variable ID="958713872:extension" blockID="958713872" value="false" visible="false"/>
 <variable ID="613985639:1354325994:text" blockID="613985639" value="spots" visible="false"/>
 <variable ID="613985639:1311159216:input" blockID="613985639" value="" visible="false"/>
 <variable ID="613985639:1311159216:Separator" blockID="613985639" value="_" visible="false"/>
 <variable ID="613985639:1311159216:Suffix" blockID="613985639" value="spots" visible="false"/>
-<variable ID="613985639:418684451:text" blockID="613985639" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots" visible="false"/>
-<variable ID="613985639:1350103216:input path" blockID="613985639" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots" visible="false"/>
+<variable ID="613985639:418684451:text" blockID="613985639" value="" visible="false"/>
+<variable ID="613985639:1350103216:input path" blockID="613985639" value="" visible="false"/>
 <variable ID="613985639:1098025557:file" blockID="613985639" value="" visible="false"/>
-<variable ID="613985639:1098025557:sequence" blockID="613985639" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_spots.tif" visible="false"/>
+<variable ID="613985639:1098025557:sequence" blockID="613985639" value="No Sequence" visible="false"/>
 <variable ID="613985639:1098025557:format" blockID="613985639" value="TIFF" visible="false"/>
 <variable ID="613985639:1098025557:overwrite" blockID="613985639" value="true" visible="false"/>
 <variable ID="613985639:1098025557:multiple file" blockID="613985639" value="false" visible="false"/>
-<variable ID="1310142354:input sequence" blockID="1310142354" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed.tif" visible="false"/>
+<variable ID="1310142354:input sequence" blockID="1310142354" value="No Sequence" visible="false"/>
 <variable ID="1310142354:extract mode" blockID="1310142354" value="ALL_LABELS_VS_BACKGROUND" visible="false"/>
 <variable ID="1310142354:value" blockID="1310142354" value="0.0" visible="false"/>
-<variable ID="1525213471:roi" blockID="1525213471" value="3179 ROI" visible="false"/>
+<variable ID="1525213471:roi" blockID="1525213471" value="No ROI" visible="false"/>
 <variable ID="1525213471:minSize" blockID="1525213471" value="50.0" visible="false"/>
 <variable ID="1525213471:maxSize" blockID="1525213471" value="10000.0" visible="false"/>
 <variable ID="1525213471:incBorder" blockID="1525213471" value="false" visible="false"/>
@@ -771,10 +771,10 @@
 <variable ID="921738698:374971700:input" blockID="921738698" value="" visible="false"/>
 <variable ID="921738698:374971700:Separator" blockID="921738698" value="_" visible="false"/>
 <variable ID="921738698:374971700:Suffix" blockID="921738698" value="dist_map" visible="false"/>
-<variable ID="921738698:998849133:text" blockID="921738698" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map" visible="false"/>
-<variable ID="921738698:140196919:input path" blockID="921738698" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map" visible="false"/>
+<variable ID="921738698:998849133:text" blockID="921738698" value="" visible="false"/>
+<variable ID="921738698:140196919:input path" blockID="921738698" value="" visible="false"/>
 <variable ID="921738698:1462746574:file" blockID="921738698" value="" visible="false"/>
-<variable ID="921738698:1462746574:sequence" blockID="921738698" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_dist_map.tif" visible="false"/>
+<variable ID="921738698:1462746574:sequence" blockID="921738698" value="No Sequence" visible="false"/>
 <variable ID="921738698:1462746574:format" blockID="921738698" value="TIFF" visible="false"/>
 <variable ID="921738698:1462746574:overwrite" blockID="921738698" value="true" visible="false"/>
 <variable ID="921738698:1462746574:multiple file" blockID="921738698" value="false" visible="false"/>
@@ -782,35 +782,35 @@
 <variable ID="455207203:1579365898:input" blockID="455207203" value="" visible="false"/>
 <variable ID="455207203:1579365898:Separator" blockID="455207203" value="_" visible="false"/>
 <variable ID="455207203:1579365898:Suffix" blockID="455207203" value="watershed" visible="false"/>
-<variable ID="455207203:183063429:text" blockID="455207203" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed" visible="false"/>
-<variable ID="455207203:760207813:input path" blockID="455207203" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed" visible="false"/>
+<variable ID="455207203:183063429:text" blockID="455207203" value="" visible="false"/>
+<variable ID="455207203:760207813:input path" blockID="455207203" value="" visible="false"/>
 <variable ID="455207203:1525483621:file" blockID="455207203" value="" visible="false"/>
-<variable ID="455207203:1525483621:sequence" blockID="455207203" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_watershed.tif" visible="false"/>
+<variable ID="455207203:1525483621:sequence" blockID="455207203" value="No Sequence" visible="false"/>
 <variable ID="455207203:1525483621:format" blockID="455207203" value="TIFF" visible="false"/>
 <variable ID="455207203:1525483621:overwrite" blockID="455207203" value="true" visible="false"/>
 <variable ID="455207203:1525483621:multiple file" blockID="455207203" value="false" visible="false"/>
 <variable ID="603024548:text" blockID="603024548" value="orig" visible="false"/>
-<variable ID="1264388200:Sequence" blockID="1264388200" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
+<variable ID="1264388200:Sequence" blockID="1264388200" value="No Sequence" visible="false"/>
 <variable ID="2083066488:input" blockID="2083066488" value="" visible="false"/>
 <variable ID="2083066488:Separator" blockID="2083066488" value="/" visible="false"/>
 <variable ID="2083066488:Suffix" blockID="2083066488" value="orig" visible="false"/>
-<variable ID="13049480:sequence" blockID="13049480" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
+<variable ID="13049480:sequence" blockID="13049480" value="No Sequence" visible="false"/>
 <variable ID="13049480:folder" blockID="13049480" value="false" visible="false"/>
 <variable ID="13049480:extension" blockID="13049480" value="true" visible="false"/>
 <variable ID="1102776919:input" blockID="1102776919" value="" visible="false"/>
 <variable ID="1102776919:Separator" blockID="1102776919" value="/" visible="false"/>
-<variable ID="1102776919:Suffix" blockID="1102776919" value="m10r1_landmark1.tif" visible="false"/>
-<variable ID="1791268016:input path" blockID="1791268016" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/orig/m10r1_landmark1.tif" visible="false"/>
+<variable ID="1102776919:Suffix" blockID="1102776919" value="" visible="false"/>
+<variable ID="1791268016:input path" blockID="1791268016" value="" visible="false"/>
 <variable ID="595702171:input file" blockID="595702171" value="" visible="false"/>
 <variable ID="595702171:Series" blockID="595702171" value="0" visible="false"/>
 <variable ID="950973258:measures" blockID="950973258" value="7885725312671744" visible="false"/>
-<variable ID="950973258:Regions of interest" blockID="950973258" value="2205 ROI" visible="false"/>
-<variable ID="950973258:Sequence" blockID="950973258" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/orig/m10r1_landmark1.tif" visible="false"/>
+<variable ID="950973258:Regions of interest" blockID="950973258" value="No ROI" visible="false"/>
+<variable ID="950973258:Sequence" blockID="950973258" value="No Sequence" visible="false"/>
 <variable ID="422371342:text" blockID="422371342" value="output" visible="false"/>
 <variable ID="1878365959:input" blockID="1878365959" value="" visible="false"/>
 <variable ID="1878365959:Separator" blockID="1878365959" value="_" visible="false"/>
 <variable ID="1878365959:Suffix" blockID="1878365959" value="output" visible="false"/>
-<variable ID="1729562892:input path" blockID="1729562892" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_output" visible="false"/>
+<variable ID="1729562892:input path" blockID="1729562892" value="" visible="false"/>
 <variable ID="245859983:workbook" blockID="245859983" value="" visible="false"/>
 <variable ID="245859983:file format" blockID="245859983" value="Text" visible="false"/>
 <variable ID="245859983:output file" blockID="245859983" value="" visible="false"/>
@@ -819,25 +819,25 @@
 <variable ID="70353053:1633855782:input" blockID="70353053" value="" visible="false"/>
 <variable ID="70353053:1633855782:Separator" blockID="70353053" value="_" visible="false"/>
 <variable ID="70353053:1633855782:Suffix" blockID="70353053" value="local_max" visible="false"/>
-<variable ID="70353053:190654452:text" blockID="70353053" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max" visible="false"/>
-<variable ID="70353053:1257476912:input path" blockID="70353053" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max" visible="false"/>
+<variable ID="70353053:190654452:text" blockID="70353053" value="" visible="false"/>
+<variable ID="70353053:1257476912:input path" blockID="70353053" value="" visible="false"/>
 <variable ID="70353053:2055572063:file" blockID="70353053" value="" visible="false"/>
-<variable ID="70353053:2055572063:sequence" blockID="70353053" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_local_max.tif" visible="false"/>
+<variable ID="70353053:2055572063:sequence" blockID="70353053" value="No Sequence" visible="false"/>
 <variable ID="70353053:2055572063:format" blockID="70353053" value="TIFF" visible="false"/>
 <variable ID="70353053:2055572063:overwrite" blockID="70353053" value="true" visible="false"/>
 <variable ID="70353053:2055572063:multiple file" blockID="70353053" value="false" visible="false"/>
-<variable ID="1511913417:input path" blockID="1511913417" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_output_despeckle" visible="false"/>
-<variable ID="863722775:measures" blockID="863722775" value="7885725312671744" visible="false"/>
-<variable ID="863722775:Regions of interest" blockID="863722775" value="" visible="false"/>
-<variable ID="863722775:Sequence" blockID="863722775" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m1r1_landmark.tif" visible="false"/>
-<variable ID="2129161382:workbook" blockID="2129161382" value="" visible="false"/>
-<variable ID="2129161382:file format" blockID="2129161382" value="Text" visible="false"/>
-<variable ID="2129161382:output file" blockID="2129161382" value="/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/m10r1_landmark1_output_despeckle" visible="false"/>
-<variable ID="2129161382:If file exists" blockID="2129161382" value="Overwrite" visible="false"/>
+<variable ID="668854659:text" blockID="668854659" value="output_despeckle" visible="false"/>
 <variable ID="1857899903:input" blockID="1857899903" value="" visible="false"/>
 <variable ID="1857899903:Separator" blockID="1857899903" value="_" visible="false"/>
 <variable ID="1857899903:Suffix" blockID="1857899903" value="output_despeckle" visible="false"/>
-<variable ID="668854659:text" blockID="668854659" value="output_despeckle" visible="false"/>
+<variable ID="1511913417:input path" blockID="1511913417" value="" visible="false"/>
+<variable ID="863722775:measures" blockID="863722775" value="7885725312671744" visible="false"/>
+<variable ID="863722775:Regions of interest" blockID="863722775" value="No ROI" visible="false"/>
+<variable ID="863722775:Sequence" blockID="863722775" value="No Sequence" visible="false"/>
+<variable ID="2129161382:workbook" blockID="2129161382" value="" visible="false"/>
+<variable ID="2129161382:file format" blockID="2129161382" value="Text" visible="false"/>
+<variable ID="2129161382:output file" blockID="2129161382" value="" visible="false"/>
+<variable ID="2129161382:If file exists" blockID="2129161382" value="Overwrite" visible="false"/>
 </input>
 <output>
 <variable ID="iteration" blockID="361489121" visible="true"/>
@@ -868,9 +868,9 @@
 <variable ID="1729562892:output file" blockID="1729562892" visible="false"/>
 <variable ID="70353053:1633855782:output" blockID="70353053" visible="false"/>
 <variable ID="70353053:1257476912:output file" blockID="70353053" visible="false"/>
+<variable ID="1857899903:output" blockID="1857899903" visible="false"/>
 <variable ID="1511913417:output file" blockID="1511913417" visible="false"/>
 <variable ID="863722775:Workbook" blockID="863722775" visible="false"/>
-<variable ID="1857899903:output" blockID="1857899903" visible="false"/>
 </output>
 </variables>
 </workflow>

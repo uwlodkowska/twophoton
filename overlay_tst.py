@@ -41,10 +41,11 @@ def draw_chosen_rois(mouse, region, sessions, idxes=[]):
 			if len(idxes) == 0 or idx in idxes :
 				pos = int(float(r['Intensity center Z (px) (ch 0)']))
 				x = int(float(r['Intensity center X (px) (ch 0)']))
-				y = int(float(r['Intensity center Y (px) (ch 0)']))
-					
+				y = int(float(r['Intensity center Y (px) (ch 0)']))	
 				roi_group = create_roi_group(x, y, pos, imp, overlay)
+			idx +=1
 	imp.setOverlay(overlay)
+
 
 
 def create_roi_group(x, y, z, img, overlay, color=green):

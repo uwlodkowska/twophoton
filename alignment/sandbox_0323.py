@@ -39,10 +39,12 @@ for m,r in constants.CTX_REGIONS:
     
     #df_filtered = df.loc[((df.int_optimized0_q != df.int_optimized1_q) | (df.int_optimized1_q != df.int_optimized2_q))]
     
-for reg in all_mice:
-    plt.plot(types, reg, marker='o', linestyle="None")
+for i,reg in enumerate(all_mice):
+    mouse_no = str(constants.CTX_REGIONS[i][0])
+    plt.plot(types, reg, marker='o', linestyle="None", color='C'+mouse_no, label=mouse_no)
 plt.title("Cell types CLL")
 plt.ylim(0,1)
+#plt.legend()
 plt.show()
 
 all_mice = []        
@@ -56,9 +58,11 @@ for m,r in constants.LANDMARK_REGIONS:
     
     
     #df_filtered = df.loc[((df.int_optimized0_q != df.int_optimized1_q) | (df.int_optimized1_q != df.int_optimized2_q))]
-    
-for reg in all_mice:
-    plt.plot(types, reg, marker='o', linestyle=None)
+
+for i,reg in enumerate(all_mice):
+    mouse_no = str(constants.LANDMARK_REGIONS[i][0])    
+    plt.plot(types, reg, marker='o', linestyle="None", color='C'+mouse_no, label=mouse_no)
 plt.title("Cell types LCC")
 plt.ylim(0,1)
+#plt.legend()
 plt.show()

@@ -1,4 +1,4 @@
-dir = "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/"
+dir = "/media/ula/DATADRIVE1/fos_gfp_tmaze/fos_gfp_tmaze2/sca_tifs/base/ready_to_process/"
 
 margin = 0;
 
@@ -6,6 +6,7 @@ scan_list = getFileList(dir);
 
 for (n = 0; n < scan_list.length; n++){
 	filename = scan_list[n];		
+	print(filename);
 	if(!File.isDirectory(dir+filename)){
 		open(dir + filename);
 		selectWindow(filename);
