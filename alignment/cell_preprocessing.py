@@ -46,15 +46,20 @@ def calculate_circ_slice(x,y,rad, img_s):
     return brightness, area
 
 def calculate_intensity_row(row, img):
+    integral_img = calculate_integral_image(img)
     x_center = int(row[ICY_COLNAMES['xcol']].round())
     y_center = int(row[ICY_COLNAMES['ycol']].round())
     z_center = int(row[ICY_COLNAMES['zcol']].round())
-    
-    if not (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1]
+    if(z_center<0):
+        print("row ", row)
+        print("z condition ", 0 <= z_center < img.shape[0])
+        print("full condition ", (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1] 
+                                  and 0 <= z_center < img.shape[0]))
+    if not (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1] 
             and 0 <= z_center < img.shape[0]):
         print(row)
         return np.NaN
-    return calculate_intensity(x_center, y_center, z_center, img)
+    return calculate_intensity(x_center, y_center, z_center, integral_img)
 
 def calculate_intensity(x,y,z, img):
     sum_int = 0
@@ -108,8 +113,6 @@ def optimize_centroids_old(df, img, suff=""):
     return df
 
 
-from scipy.ndimage import uniform_filter
-
 def calculate_integral_image(stack):
     """Compute integral image for efficient brightness calculations."""
     integral_volume = np.array([img.cumsum(axis=0, dtype=np.int64).cumsum(axis=1, dtype=np.int64) for img in stack])
@@ -149,8 +152,7 @@ def optimize_centroid_position(row, img, suff, tolerance):
 def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE):
     """Optimize the positions of centroids in a DataFrame."""
     integral_img = calculate_integral_image(img)
-    #df = df.parallel_apply(optimize_centroid_position, img=integral_img, suff=suff, tolerance=tolerance, axis=1)
-    df = df.apply(optimize_centroid_position, img=integral_img, suff=suff, tolerance=tolerance, axis=1)
+    df = df.parallel_apply(optimize_centroid_position, img=integral_img, suff=suff, tolerance=tolerance, axis=1)
     return df
 
 
@@ -174,9 +176,9 @@ def calculate_background_intensity(df, img):
     bg_df = pd.DataFrame()
     for cname in ICY_COLNAMES:
         if 'col' in cname:
-            bg_df[ICY_COLNAMES[cname]] = df[ICY_COLNAMES[cname]]-5#magic string! z-axis size of cell
-    bg_df['bg_intensity'] = df.apply(calculate_intensity_row ,img = img, axis = 1)
-    #bg_df['bg_intensity'] = df.parallel_apply(calculate_intensity_row ,img = img, axis = 1)
+            bg_df[ICY_COLNAMES[cname]] = df[ICY_COLNAMES[cname]]
+        bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]-5#magic int! z-axis size of cell
+    bg_df['bg_intensity'] = df.parallel_apply(calculate_intensity_row ,img = img, axis = 1)
     return bg_df
     
 def test_fun(mouse, region, s_idxses, session_order):

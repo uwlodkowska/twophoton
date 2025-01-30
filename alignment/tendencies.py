@@ -52,6 +52,9 @@ for m,r in regions:
     plt.show()
     tendencies += [intersession.find_intersession_tendencies(df, sessions=[0,1,2])]
 
+
+#%%
+bgr = cp.calculate_background_intensity(df, img)
 #%%
 plt.ion()
 for m,r in regions:
