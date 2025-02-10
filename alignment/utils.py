@@ -8,7 +8,7 @@ Created on Mon Feb 20 17:19:59 2023
 import pandas as pd
 import constants
 from skimage import io
-import intersession
+import numpy as np
 import math
 
 def read_single_session_cell_data(mouse, region, sessions):
@@ -44,6 +44,41 @@ def assign_quantile(df, colname, step=0.2):
 def read_behav_data():
     return pd.read_excel(constants.BEHAV_DIR, sheet_name="summary",header=0, index_col=1)
 
-
+def filter_close_matches(df1, df2, coord_cols, tolerance):
+    """
+    Merges two dataframes, computes distances based on 3D coordinates, 
+    filters by tolerance, and removes duplicates.
     
+    Args:
+        df1 (pd.DataFrame): First dataframe
+        df2 (pd.DataFrame): Second dataframe
+        coord_cols (list): List of coordinate column names (e.g., ['x', 'y', 'z'])
+        tolerance (float): Distance threshold for filtering
+        
+    Returns:
+        pd.DataFrame: Filtered dataframe with averaged coordinates
+        np.ndarray: Indices from df1 to drop
+        np.ndarray: Indices from df2 to drop
+    """
+    cross_prod = df1.merge(df2, how="cross", suffixes=("_1", "_2"))
+    
+    # Compute Euclidean distance
+    cross_prod["distance"] = np.linalg.norm(
+        cross_prod[[f"{col}_1" for col in coord_cols]].values 
+        - cross_prod[[f"{col}_2" for col in coord_cols]].values, axis=1
+    )
+
+    # Filter by tolerance
+    cross_prod = cross_prod[cross_prod["distance"] < tolerance]
+    cross_prod = cross_prod.sort_values(by="distance", ascending=True)
+
+    # Deduplicate
+    cross_prod = cross_prod.drop_duplicates(subset=["index_2"]).drop_duplicates(subset=["index_1"])
+
+    # Compute averaged coordinates
+    for col in coord_cols:
+        cross_prod[col] = (cross_prod[f"{col}_1"] + cross_prod[f"{col}_2"]) / 2
+        cross_prod = cross_prod.drop(columns=[f"{col}_1", f"{col}_2"])
+
+    return cross_prod.drop(columns=["distance"]), cross_prod["index_1"].values, cross_prod["index_2"].values
     
