@@ -12,6 +12,7 @@ import constants
 import cell_preprocessing as cp
 import visualization
 
+
 def identify_persistent_cells(mouse, region, sessions, session_ids):
     #tu dodac standaryzacje intensity?
     if sessions is None:
@@ -178,11 +179,11 @@ def distribution_change_all_sessions(mouse, region, sessions):
         print(tr)
         
         
-def find_intersession_tendencies(df, sessions=[1,2,3], colname='int_optimized'):
+def find_intersession_tendencies_raw(df,sessions=[1,2,3], colname='int_optimized'):
     tendencies = []
     for i in range(len(sessions)-1):
-        df[colname+str(sessions[i])+'_low'] = df.int_optimized0*0.8
-        df[colname+str(sessions[i])+'_high'] = df.int_optimized0*1.2
+        df[colname+str(sessions[i])+'_low'] = df[colname+str(sessions[i])]*0.8
+        df[colname+str(sessions[i])+'_high'] = df[colname+str(sessions[i])]*1.2
         
         condition_down = df[colname+str(sessions[i+1])] < df[colname+str(sessions[i])+'_low']
         condition_up = df[colname+str(sessions[i+1])] > df[colname+str(sessions[i])+'_high']
@@ -190,5 +191,36 @@ def find_intersession_tendencies(df, sessions=[1,2,3], colname='int_optimized'):
         stable = df.loc[ (~condition_down) & (~condition_up)]
         up = df.loc[condition_up]
         print("up: ", up.shape[0],"down: ", down.shape[0],"stable: ", stable.shape[0])
+        tendencies += [up.shape[0], down.shape[0], stable.shape[0]]
+    return tendencies
+
+def find_intersession_tendencies_bgr(df,bgr,k=1, sessions=[1,2,3], colname='int_optimized'):
+    tendencies = []
+    print("shape ", df.shape[0])
+    for i in range(len(sessions)):
+        df[colname+str(sessions[i])] = df[colname+str(sessions[i])]-bgr[i,0]
+    for i in range(len(sessions)-1):
+        df[colname+str(sessions[i])+'_low'] = df[colname+str(sessions[i])]*0.7# - k*(bgr[i,1]+bgr[i+1,1])
+        df[colname+str(sessions[i])+'_high'] = df[colname+str(sessions[i])]*1.3# + k*(bgr[i,1]+bgr[i+1,1])
+        
+        condition_down = df[colname+str(sessions[i+1])] < df[colname+str(sessions[i])+'_low']
+        condition_up = df[colname+str(sessions[i+1])] > df[colname+str(sessions[i])+'_high']
+        down = df.loc[condition_down]
+        stable = df.loc[ (~condition_down) & (~condition_up)]
+        up = df.loc[condition_up]
+        print("up: ", up.shape[0],"down: ", down.shape[0],"stable: ", stable.shape[0])
+        tendencies += [up.shape[0], down.shape[0], stable.shape[0]]
+    return tendencies      
+            
+def find_intersession_tendencies_on_off(df, sessions=[1,2,3], colname='active'):
+    tendencies = []
+    for i in range(len(sessions)-1):
+        condition_down = (df[colname+str(sessions[i])]) & (~df[colname+str(sessions[i+1])])
+        condition_stable = (df[colname+str(sessions[i+1])]) & (df[colname+str(sessions[i])])
+        condition_up = (~df[colname+str(sessions[i])]) & (df[colname+str(sessions[i+1])])
+        down = df.loc[condition_down]
+        stable = df.loc[condition_stable]
+        up = df.loc[condition_up]
+        print("on off up: ", up.shape[0],"down: ", down.shape[0],"stable: ", stable.shape[0])
         tendencies += [up.shape[0], down.shape[0], stable.shape[0]]
     return tendencies

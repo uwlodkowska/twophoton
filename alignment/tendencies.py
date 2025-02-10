@@ -13,15 +13,13 @@ import intersession
 import cell_preprocessing as cp
 import pandas as pd
 import matplotlib.pyplot as plt
+from constants import ICY_COLNAMES
 
 from pandarallel import pandarallel
 
 
 #%%
-regions = [[2,1]]#, [3,2], [4,2], [6,2], [7,1], [11,1], [14,1]]
-
-
-#%%
+regions = [[2,1],[3,2],[4,2],[6,2], [7,1], [11,1], [14,1]]
 
 
 #%%
@@ -29,32 +27,144 @@ regions = [[2,1]]#, [3,2], [4,2], [6,2], [7,1], [11,1], [14,1]]
 
 pandarallel.initialize()
 tendencies = []
+tendencies_on_off = []
 all_pooled = []
 ovlaps = []
 for m,r in regions:
+    bgrv = []
     imgs = [utils.read_image(m, r, i) for i in [1,2,3]]
     tstx = intersession.pooled_cells(m,r, [1,2,3])
-    all_pooled += [tstx]
+    #all_pooled += [tstx]
     prev = tstx
     for i,img in enumerate(imgs):
         df = cp.optimize_centroids(prev, img, suff=str(i))
-        bgr = cp.calculate_background_intensity(df, img)
+        bgr,cprod = cp.calculate_background_intensity(df, img)
+        b_mean = np.mean(bgr.bg_intensity)
+        b_std = np.std(bgr.bg_intensity)
+        threshold = b_mean + 6 * b_std
+        df[f'active{i}'] = df[f"int_optimized{i}"] > threshold#s pohl
+        bgrv += [[b_mean, b_std]]
         prev = df
     idx_arr = []
     for i in ['0','1', '2']:
         q1 = df["int_optimized"+i].quantile(0.9)
         idx_arr += [df[df["int_optimized"+i] <= q1].index]
         plt.hist(df["int_optimized"+i], bins = 40, alpha=0.5)
-    s12 = len(np.intersect1d(idx_arr[0], idx_arr[1]))/len(idx_arr[0])
-    s23 = len(np.intersect1d(idx_arr[1], idx_arr[2]))/len(idx_arr[1])
+    df.to_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    s12 = len(set(idx_arr[0]) & set(idx_arr[1])) / len(idx_arr[0])
+    s23 = len(set(idx_arr[1]) & set(idx_arr[2])) / len(idx_arr[1])
     ovlaps+=[[s12, s23]]    
     plt.title("m"+str(m))
     plt.show()
     tendencies += [intersession.find_intersession_tendencies(df, sessions=[0,1,2])]
+    tendencies_on_off += [intersession.find_intersession_tendencies_on_off(df, sessions=[0,1,2])]
 
+#%% HELPER FUNCTIONS FOR PLOTTING TENDENCIES
+
+def plot_tendencies(tendencies, title):
+    colors = ['blue', 'orange', 'green']
+
+    means = np.array([tendencies[:, :3].mean(axis=0), tendencies[:, 3:].mean(axis=0)])
+    stds = np.array([tendencies[:, :3].std(axis=0), tendencies[:, 3:].std(axis=0)])
+
+    x_vals = np.array([0, 1])  # x-axis positions
+
+    plt.figure(figsize=(6, 4))
+    groups = ['up', 'down', 'stable']
+    for i in range(3):
+        plt.plot(x_vals, means[:, i], marker='o', linestyle='-', color=colors[i], label=groups[i])
+        plt.fill_between(x_vals, means[:, i] - stds[:, i], means[:, i] + stds[:, i], color=colors[i], alpha=0.2)
+
+    plt.xlabel('n=7')
+    plt.ylabel('Value')
+    plt.title(title)
+    plt.xticks([0, 1], ['ctx A - ctx B', 'ctx B - ctxB'])
+    plt.legend()
+    plt.show()
+
+
+
+#%% TENDENCIES FOR CELLS MARKED AS ACTIVE/NOT ACTIVE
+
+
+tendencies_on_off = []
+session_total = []
+any_session = []
+for m,r in regions:
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    st = []
+    for i in range(3):
+        st+= [df.loc[df[f"active{i}"]].shape[0]]
+    session_total += [st]
+    any_session += [df.loc[df["active0"] | df["active1"] | df["active2"]].shape[0]]
+    tendencies_on_off += [intersession.find_intersession_tendencies_on_off(df, sessions=[0,1,2])]
+
+tendencies = np.array(tendencies_on_off)
+tendencies = np.array([tendencies[i]/st for i, st in enumerate(any_session)])
+
+plot_tendencies(tendencies, "On/off cells, threshold mean+6*std background")
+
+#%% TENDENCIES FOR RAW CELL DATA
+
+tendencies = []
+session_total = []
+any_session = []
+for m,r in regions:
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    tendencies += [intersession.find_intersession_tendencies_raw(df, sessions=[0,1,2])]
+
+tendencies = np.array(tendencies)
+tendencies = np.array([tend/np.sum(tend[:3]) for tend in tendencies])
+
+plot_tendencies(tendencies, "Raw value")
+
+#%% TENDENCIES WITH BACKGROUND SUBTRACTION
+
+bgr_data = pd.read_csv("/media/ula/DATADRIVE1/fos_gfp_tmaze/results/background.csv")
+
+tendencies = []
+for m,r in regions:
+    bgrv = []
+    imgs = [utils.read_image(m, r, i) for i in [1,2,3]]
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    for i in range(3):
+        bgrv += list(bgr_data.loc[(bgr_data['m']==m)&(bgr_data['r']==r), [f'mean{i}',f'sdev{i}']].values)
+    tendencies += [intersession.find_intersession_tendencies_bgr(df, bgr = np.array(bgrv), sessions=[0,1,2], k=0.5)]
+
+
+tendencies = np.array(tendencies)
+tendencies = np.array([tend/np.sum(tend[:3]) for tend in tendencies])
+
+plot_tendencies(tendencies, "Background subtraction, k=1")
 
 #%%
-bgr = cp.calculate_background_intensity(df, img)
+bgr_data.to_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/background.csv")
+#%%
+for i, st in enumerate(session_total):
+    plt.plot(np.array(st)/any_session[i])
+
+#%%
+for i in range(3):
+    print(df.loc[df['active'+str(i)]].shape[0])
+#%%
+res = intersession.find_intersession_tendencies_on_off(df, sessions=[0,1,2])
+
+#%%
+
+imgs = [utils.read_image(m, r, i) for i in [1,2,3]]
+for img in imgs:
+    bgr_vec, cprod = cp.calculate_background_intensity(df, img)
+    print(np.mean(bgr_vec.bg_intensity), np.std(bgr_vec.bg_intensity))
+#%%
+print(np.mean(bgr_vec.bg_intensity), np.std(bgr_vec.bg_intensity))
+
+#%%
+plt.scatter(bgr[ICY_COLNAMES['ycol']],bgr.bg_intensity)
+#%%
+plt.hist(df["int_optimized0"], range=(0,125), bins = 40)
+plt.hist(bgr["bg_intensity"], range=(0,125), alpha=0.5, bins = 40)
+plt.plot()
+'''
 #%%
 plt.ion()
 for m,r in regions:
@@ -89,3 +199,4 @@ plt.show()
 #%%
 tendecies_np  = np.array(tendencies)
 tendecies_np=tendecies_np/np.sum(tendecies_np[:3])
+'''

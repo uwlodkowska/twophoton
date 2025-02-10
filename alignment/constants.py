@@ -36,7 +36,7 @@ FILENAMES = {'single_session_cell_data_fn' : "m{}r{}_{}_output.txt",#output from
 INTENSITY_HIST = "Intensity_diff_m{}_r{}"
 INTENSITY_PLT = "Cell_intensity_m{}_r{}_s{}"
 
-TOLERANCE = 4
+TOLERANCE = 5
 
 CTX_FIRST_SESSIONS = ['ctx', 'landmark1', 'landmark2']
 LANDMARK_FIRST_SESSIONS = ['landmark', 'ctx1', 'ctx2']
