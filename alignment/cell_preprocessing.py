@@ -10,6 +10,7 @@ import pandas as pd
 from skimage import io
 from constants import ICY_COLNAMES
 import constants
+from concurrent.futures import ProcessPoolExecutor
 
 
 def calculate_disk(coords, radius, disk_no, img):
@@ -45,37 +46,49 @@ def calculate_circ_slice(x,y,rad, img_s):
     area =  (xmax-xmin)*(ymax-ymin)
     return brightness, area
 
-def calculate_intensity_row(row, img):
-    integral_img = calculate_integral_image(img)
-    x_center = int(row[ICY_COLNAMES['xcol']].round())
-    y_center = int(row[ICY_COLNAMES['ycol']].round())
-    z_center = int(row[ICY_COLNAMES['zcol']].round())
-    if(z_center<0):
-        print("row ", row)
-        print("z condition ", 0 <= z_center < img.shape[0])
-        print("full condition ", (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1] 
-                                  and 0 <= z_center < img.shape[0]))
-    if not (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1] 
-            and 0 <= z_center < img.shape[0]):
-        print(row)
-        return np.NaN
-    return calculate_intensity(x_center, y_center, z_center, integral_img)
+# def calculate_intensity(x,y,z, img):
+#     sum_int = 0
+#     area_int = 0
+#     for i in range(-2,3): #going through 5 flat slices making up the 3d cell
+#         diameter = constants.ROI_DIAMETER[abs(i)]
+#         rad = diameter//2
+#         if (z+i <0 or z+i>=img.shape[0]):
+#             continue
+#         img_s = img[z+i]
+#         res = calculate_circ_slice(x,y,rad,img_s) 
+#         sum_int += res[0]
+#         area_int += res[1]
+#     if area_int == 0:
+#         return 0
+#     return sum_int/area_int
 
-def calculate_intensity(x,y,z, img):
+def calculate_intensity(x, y, z, img):
     sum_int = 0
     area_int = 0
-    for i in range(-2,3): #going through 5 flat slices making up the 3d cell
-        diameter = constants.ROI_DIAMETER[abs(i)]
-        rad = diameter//2
-        if (z+i <0 or z+i>=img.shape[0]):
-            continue
-        img_s = img[z+i]
-        res = calculate_circ_slice(x,y,rad,img_s) 
-        sum_int += res[0]
-        area_int += res[1]
-    if area_int == 0:
-        return 0
-    return sum_int/area_int
+    z_slices = np.arange(z - 2, z + 3)  # 5 slices centered at z
+    valid_slices = z_slices[(z_slices >= 0) & (z_slices < img.shape[0])]  # Keep valid z-indices
+
+    for z_slice in valid_slices:
+        diameter = constants.ROI_DIAMETER[abs(z_slice - z)]
+        rad = diameter // 2
+
+        xmin = max(x - rad, 0)
+        xmax = min(x + rad, img.shape[2] - 1)
+        ymin = max(y - rad, 0)
+        ymax = min(y + rad, img.shape[1] - 1)
+
+        img_s = img[z_slice]
+
+        # Efficient NumPy sum within the bounding box
+        brightness = int(img_s[ymax][xmax])+int(img_s[ymin][xmin])-int(img_s[ymin][xmax])-int(img_s[ymax][xmin])
+        area =  (xmax-xmin)*(ymax-ymin)
+
+        sum_int += brightness
+        area_int += area
+
+    return 0 if area_int == 0 else sum_int / area_int
+
+
 
 def get_brightest_cells(mouse, region, session, percentage):
     df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_"+ 
@@ -118,42 +131,87 @@ def calculate_integral_image(stack):
     integral_volume = np.array([img.cumsum(axis=0, dtype=np.int64).cumsum(axis=1, dtype=np.int64) for img in stack])
     return integral_volume
 
-def optimize_centroid_position(row, img, suff, tolerance):
-    """Optimize the position of a single centroid."""
-    x_center = int(row[ICY_COLNAMES['xcol']].round())
-    y_center = int(row[ICY_COLNAMES['ycol']].round())
-    z_center = int(row[ICY_COLNAMES['zcol']].round())
+
+
+# def optimize_centroid_position(args):
+#     """Optimize the position of a single centroid."""
+#     row, img, suff, tolerance = args
+#     x_center = int(np.round(row[ICY_COLNAMES['xcol']]))
+#     y_center = int(np.round(row[ICY_COLNAMES['ycol']]))
+#     z_center = int(np.round(row[ICY_COLNAMES['zcol']]))
     
-    current_max = -np.inf
-    best_coords = (0, 0, 0)
+#     current_max = -np.inf
+#     best_coords = (0, 0, 0)
+
+#     for x in range(-tolerance, tolerance + 1):
+#         for y in range(-tolerance, tolerance + 1):
+#             for z in range(-1, 2):
+#                 new_x = x_center + x
+#                 new_y = y_center + y
+#                 new_z = z_center + z
+                
+#                 # Check bounds
+#                 if not (0 <= new_x < img.shape[2] and 0 <= new_y < img.shape[1] and 0 <= new_z < img.shape[0]):
+#                     continue
+                
+#                 mean_calculated = calculate_intensity(new_x, new_y, new_z, img)  
+#                 if mean_calculated > current_max:
+#                     current_max = mean_calculated
+#                     best_coords = (x, y, z)
+
+#     return (best_coords[0], best_coords[1], best_coords[2], current_max)
+
+
+def optimize_centroid_position(args):
+    """Optimize the position of a single centroid using vectorized operations."""
+    row, img, suff, tolerance = args
+    x_center = int(np.round(row[ICY_COLNAMES['xcol']]))
+    y_center = int(np.round(row[ICY_COLNAMES['ycol']]))
+    z_center = int(np.round(row[ICY_COLNAMES['zcol']]))
     
-    for x in range(-tolerance, tolerance + 1):
-        for y in range(-tolerance, tolerance + 1):
-            for z in range(-1, 2):
-                new_x = x_center + x
-                new_y = y_center + y
-                new_z = z_center + z
-                
-                # Check bounds if needed
-                if not (0 <= new_x < img.shape[2] and 0 <= new_y < img.shape[1]
-                        and 0 <= new_z < img.shape[0]):
-                    continue
-                
-                mean_calculated = calculate_intensity(new_x, new_y, new_z, img)  # Update with integral method
-                if mean_calculated > current_max:
-                    current_max = mean_calculated
-                    best_coords = (x, y, z)
-    row[f'shift_x{suff}'] = best_coords[0]
-    row[f'shift_y{suff}'] = best_coords[1]
-    row[f'shift_z{suff}'] = best_coords[2]
-    row[f'int_optimized{suff}'] = current_max
-    return row
+    # Generate all possible shifts
+    x_shifts = np.arange(-tolerance, tolerance + 1)
+    y_shifts = np.arange(-tolerance, tolerance + 1)
+    z_shifts = np.array([-1, 0, 1])
+
+    # Generate all possible coordinate combinations
+    x_offsets, y_offsets, z_offsets = np.meshgrid(x_shifts, y_shifts, z_shifts, indexing='ij')
+    
+    new_x = x_center + x_offsets.ravel()
+    new_y = y_center + y_offsets.ravel()
+    new_z = z_center + z_offsets.ravel()
+
+    # Keep only valid coordinates
+    valid_mask = (0 <= new_x) & (new_x < img.shape[2]) & \
+                 (0 <= new_y) & (new_y < img.shape[1]) & \
+                 (0 <= new_z) & (new_z < img.shape[0])
+
+    new_x, new_y, new_z = new_x[valid_mask], new_y[valid_mask], new_z[valid_mask]
+
+    # Compute brightness in one batch
+    brightness_values = np.array([calculate_intensity(x, y, z, img) for x, y, z in zip(new_x, new_y, new_z)])
+
+    # Find the best shift
+    best_idx = np.argmax(brightness_values)
+    best_coords = (new_x[best_idx] - x_center, new_y[best_idx] - y_center, new_z[best_idx] - z_center)
+
+    return (*best_coords, brightness_values[best_idx])
 
 def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE):
-    """Optimize the positions of centroids in a DataFrame."""
+    """Optimize the positions of centroids using parallel processing."""
     integral_img = calculate_integral_image(img)
-    df = df.parallel_apply(optimize_centroid_position, img=integral_img, suff=suff, tolerance=tolerance, axis=1)
+
+    args_list = [(row, integral_img, suff, tolerance) for _, row in df.iterrows()]
+    
+    with ProcessPoolExecutor() as executor:
+        results = list(executor.map(optimize_centroid_position, args_list))
+
+    # Convert results back to DataFrame
+    df[[f'shift_x{suff}', f'shift_y{suff}', f'shift_z{suff}', f'int_optimized{suff}']] = results
+
     return df
+
+
 
 
 
@@ -172,15 +230,59 @@ def pixels_to_um(df):
     df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]*constants.Z_SCALE
     return df
 
+def calculate_intensity_row(args):
+    """Calculate intensity for a given row and image."""
+    row, img = args  # Unpack arguments
+    integral_img = calculate_integral_image(img)
+    x_center = int(row[ICY_COLNAMES['xcol']].round())
+    y_center = int(row[ICY_COLNAMES['ycol']].round())
+    z_center = int(row[ICY_COLNAMES['zcol']].round())
+
+    if not (0 <= x_center < img.shape[2] and 0 <= y_center < img.shape[1] 
+            and 0 <= z_center < img.shape[0]):
+        return np.NaN
+    return calculate_intensity(x_center, y_center, z_center, integral_img)
+
 def calculate_background_intensity(df, img):
+    """Calculate background intensity for a DataFrame using parallel processing."""
     bg_df = pd.DataFrame()
+
+    # Copy the relevant coordinate columns
     for cname in ICY_COLNAMES:
         if 'col' in cname:
             bg_df[ICY_COLNAMES[cname]] = df[ICY_COLNAMES[cname]]
-        bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']]-5#magic int! z-axis size of cell
-    bg_df['bg_intensity'] = df.parallel_apply(calculate_intensity_row ,img = img, axis = 1)
-    return bg_df
     
+    bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']] - constants.TOLERANCE
+    
+
+    # Compute cross product for background subtraction
+    cross_prod = bg_df.reset_index().merge(df, how="cross", suffixes=("_bg", "_df"))
+    cross_prod['distance'] = np.linalg.norm(
+        cross_prod[[n+"_bg" for n in constants.COORDS_3D]].values -
+        cross_prod[[n+"_df" for n in constants.COORDS_3D]].values, axis=1
+    )
+    cross_prod = cross_prod[cross_prod.distance < constants.TOLERANCE]
+    cross_prod = cross_prod.sort_values(by='distance', ascending=True)
+    cross_prod = cross_prod.drop_duplicates(subset=["index_bg"]).drop_duplicates(subset=["index_df"])
+
+    # Remove background points that are too close to the foreground
+    bg_df = bg_df.drop(np.array(cross_prod.index_bg))
+    # Prepare arguments for parallel processing
+    args_list = [(row, img) for _, row in bg_df.iterrows()]
+
+    # Parallel computation of background intensity
+    with ProcessPoolExecutor() as executor:
+        bg_df['bg_intensity'] = list(executor.map(calculate_intensity_row, args_list))
+
+    bg_df = bg_df.dropna()
+
+    return bg_df, cross_prod
+    
+
+
+
+
+
 def test_fun(mouse, region, s_idxses, session_order):
     old_method_df = pd.read_csv(constants.dir_path + constants.FILENAMES["cell_data_fn_template"]
                 .format(mouse, region, session_order[s_idxses[1]]+"_"+session_order[s_idxses[0]]))
