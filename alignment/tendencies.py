@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Created on Mon Feb 10 22:27:01 2025
+
+@author: ula
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
 Created on Mon Jan 20 17:01:16 2025
 
 @author: ula
@@ -13,15 +21,15 @@ import intersession
 import cell_preprocessing as cp
 import pandas as pd
 import matplotlib.pyplot as plt
-from constants import ICY_COLNAMES
+import constants
+from constants import ICY_COLNAMES, CTX_REGIONS
 
 from pandarallel import pandarallel
 
 
 #%%
 regions = [[2,1],[3,2],[4,2],[6,2], [7,1], [11,1], [14,1]]
-
-
+regions = [[9,1], [12,1]]
 #%%
 
 
@@ -32,8 +40,8 @@ all_pooled = []
 ovlaps = []
 for m,r in regions:
     bgrv = []
-    imgs = [utils.read_image(m, r, i) for i in [1,2,3]]
-    tstx = intersession.pooled_cells(m,r, [1,2,3])
+    imgs = [utils.read_image(m, r, i) for i in constants.LANDMARK_FIRST_SESSIONS]#[1,2,3]]
+    tstx = intersession.pooled_cells(m,r, constants.LANDMARK_FIRST_SESSIONS)#[1,2,3]]
     #all_pooled += [tstx]
     prev = tstx
     for i,img in enumerate(imgs):
@@ -50,13 +58,30 @@ for m,r in regions:
         q1 = df["int_optimized"+i].quantile(0.9)
         idx_arr += [df[df["int_optimized"+i] <= q1].index]
         plt.hist(df["int_optimized"+i], bins = 40, alpha=0.5)
-    df.to_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    df.to_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv")
+   
+    
+    bgr_data = pd.read_csv("/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/background.csv")
+    
+    d = dict.fromkeys(bgr_data.columns, 0)
+    d['m'] = m
+    d['r'] = r 
+    for i, bgr in enumerate(bgrv):
+        d[f'mean{i}'] = bgr[0]
+        d[f'sdev{i}'] = bgr[1]
+
+    bgr_data.loc[len(bgr_data)] = d
+
+    bgr_data.drop(columns="Unnamed: 0", inplace=True)
+    
+    
+    bgr_data.to_csv("/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/background.csv")
     s12 = len(set(idx_arr[0]) & set(idx_arr[1])) / len(idx_arr[0])
     s23 = len(set(idx_arr[1]) & set(idx_arr[2])) / len(idx_arr[1])
     ovlaps+=[[s12, s23]]    
     plt.title("m"+str(m))
     plt.show()
-    tendencies += [intersession.find_intersession_tendencies(df, sessions=[0,1,2])]
+    tendencies += [intersession.find_intersession_tendencies_raw(df, sessions=[0,1,2])]
     tendencies_on_off += [intersession.find_intersession_tendencies_on_off(df, sessions=[0,1,2])]
 
 #%% HELPER FUNCTIONS FOR PLOTTING TENDENCIES
@@ -75,10 +100,10 @@ def plot_tendencies(tendencies, title):
         plt.plot(x_vals, means[:, i], marker='o', linestyle='-', color=colors[i], label=groups[i])
         plt.fill_between(x_vals, means[:, i] - stds[:, i], means[:, i] + stds[:, i], color=colors[i], alpha=0.2)
 
-    plt.xlabel('n=7')
+    plt.xlabel('n=5')
     plt.ylabel('Value')
     plt.title(title)
-    plt.xticks([0, 1], ['ctx A - ctx B', 'ctx B - ctxB'])
+    plt.xticks([0, 1], ['landmark-ctx', 'ctx-ctx'])
     plt.legend()
     plt.show()
 
@@ -91,7 +116,7 @@ tendencies_on_off = []
 session_total = []
 any_session = []
 for m,r in regions:
-    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv")
     st = []
     for i in range(3):
         st+= [df.loc[df[f"active{i}"]].shape[0]]
@@ -110,7 +135,7 @@ tendencies = []
 session_total = []
 any_session = []
 for m,r in regions:
-    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv")
     tendencies += [intersession.find_intersession_tendencies_raw(df, sessions=[0,1,2])]
 
 tendencies = np.array(tendencies)
@@ -120,16 +145,15 @@ plot_tendencies(tendencies, "Raw value")
 
 #%% TENDENCIES WITH BACKGROUND SUBTRACTION
 
-bgr_data = pd.read_csv("/media/ula/DATADRIVE1/fos_gfp_tmaze/results/background.csv")
+bgr_data = pd.read_csv("/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/background.csv")
 
 tendencies = []
 for m,r in regions:
     bgrv = []
-    imgs = [utils.read_image(m, r, i) for i in [1,2,3]]
-    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/m{m}r{r}.csv")
+    df = pd.read_csv(f"/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv")
     for i in range(3):
         bgrv += list(bgr_data.loc[(bgr_data['m']==m)&(bgr_data['r']==r), [f'mean{i}',f'sdev{i}']].values)
-    tendencies += [intersession.find_intersession_tendencies_bgr(df, bgr = np.array(bgrv), sessions=[0,1,2], k=0.5)]
+    tendencies += [intersession.find_intersession_tendencies_bgr(df, bgr = np.array(bgrv), sessions=[0,1,2], k=1)]
 
 
 tendencies = np.array(tendencies)
