@@ -196,12 +196,13 @@ def find_intersession_tendencies_raw(df,sessions=[1,2,3], colname='int_optimized
 
 def find_intersession_tendencies_bgr(df,bgr,k=1, sessions=[1,2,3], colname='int_optimized'):
     tendencies = []
+    
     print("shape ", df.shape[0])
     for i in range(len(sessions)):
         df[colname+str(sessions[i])] = df[colname+str(sessions[i])]-bgr[i,0]
     for i in range(len(sessions)-1):
-        df[colname+str(sessions[i])+'_low'] = df[colname+str(sessions[i])]*0.7# - k*(bgr[i,1]+bgr[i+1,1])
-        df[colname+str(sessions[i])+'_high'] = df[colname+str(sessions[i])]*1.3# + k*(bgr[i,1]+bgr[i+1,1])
+        df[colname+str(sessions[i])+'_low'] = df[colname+str(sessions[i])] - k*(bgr[i,1]+bgr[i+1,1])
+        df[colname+str(sessions[i])+'_high'] = df[colname+str(sessions[i])] + k*(bgr[i,1]+bgr[i+1,1])
         
         condition_down = df[colname+str(sessions[i+1])] < df[colname+str(sessions[i])+'_low']
         condition_up = df[colname+str(sessions[i+1])] > df[colname+str(sessions[i])+'_high']
@@ -224,3 +225,25 @@ def find_intersession_tendencies_on_off(df, sessions=[1,2,3], colname='active'):
         print("on off up: ", up.shape[0],"down: ", down.shape[0],"stable: ", stable.shape[0])
         tendencies += [up.shape[0], down.shape[0], stable.shape[0]]
     return tendencies
+            
+def cell_classes(df, sessions=[1,2,3], colname='active'):
+    
+    any_session = len(df.loc[(df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])])
+                    | (df[colname+str(sessions[2])])])
+    class1 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (~df[colname+str(sessions[2])])])
+    class2 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (~df[colname+str(sessions[2])])])
+    class3 = len(df.loc[(~df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])
+    class4 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])
+    class5 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (~df[colname+str(sessions[2])])])
+    class6 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])
+    class7 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])
+    ret = np.array([class1,class2,class3,class4,class5,class6,class7])/any_session
+    print(ret)
+    return ret
