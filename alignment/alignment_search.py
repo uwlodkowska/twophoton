@@ -19,7 +19,7 @@ def find_optimal_crop(substack1, substack2):
     minv = 5000
     minx = 0
     miny = 0
-    for x in range(-constants.ALIGNMENT_SEARCH_WINDOW, constants.ALIGNMENT_SEARCH_WINDOW):
+    for x in range(-constants.ALIGNMENT_SEARCH_WINDOW-15, constants.ALIGNMENT_SEARCH_WINDOW+15):
         for y in range(-constants.ALIGNMENT_SEARCH_WINDOW, constants.ALIGNMENT_SEARCH_WINDOW):
             dif_cropped = calculate_cropped_diff(substack1, substack2, x, y)
             tmp_avg = np.average(dif_cropped)
@@ -264,7 +264,7 @@ def align_all_sessions(m,r, session_order, bounds=[0,0]):
         print("-------------------------------------")
         
 #%%
-align_all_sessions(14,1,[1,2,3], bounds=[0,0])
+align_all_sessions(11,1,["ret1", "ret2", "ret3"], bounds=[0,0])
 #%%
 
 
