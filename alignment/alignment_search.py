@@ -5,7 +5,25 @@ import constants
 from skimage import io
 import tifffile, csv
 from os import path
+import sys
+import yaml
 
+#%%
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/ctx_landmark_rev.yaml"
+
+with open(config_file, "r") as file:
+    config = yaml.safe_load(file)
+
+#%%
+DIR_PATH = config["experiment"]["dir_path"]
+RESULT_PATH = DIR_PATH + config["experiment"]["res_dir_path"]
+ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
+
+
+regions = config["experiment"]["regions"][0]
+group_session_order = config["experiment"]["session_order"][0]
+
+alignment_filenames = config["alignment_filenames"]
 #%%
 def calculate_cropped_diff(substack1, substack2, x, y):
     xdif = min(substack1.shape[1], substack2.shape[1])-abs(x);
@@ -16,17 +34,58 @@ def calculate_cropped_diff(substack1, substack2, x, y):
     return dif_tmp
 
 def find_optimal_crop(substack1, substack2):
-    minv = 5000
-    minx = 0
-    miny = 0
-    for x in range(-constants.ALIGNMENT_SEARCH_WINDOW-15, constants.ALIGNMENT_SEARCH_WINDOW+15):
-        for y in range(-constants.ALIGNMENT_SEARCH_WINDOW, constants.ALIGNMENT_SEARCH_WINDOW):
-            dif_cropped = calculate_cropped_diff(substack1, substack2, x, y)
-            tmp_avg = np.average(dif_cropped)
-            if tmp_avg < minv:
-                minv = tmp_avg
-                minx = x
-                miny = y
+    expansions = 0
+    step = 10
+    start_range = 25
+    x_start, y_start, x_end, y_end = -start_range, -start_range, start_range, start_range
+    
+    while True:
+        xrange = range(x_start, x_end)
+        yrange = range(y_start, y_end)
+
+        minv = float('inf')
+        minx, miny = None, None
+
+        for x in xrange:
+            for y in yrange:
+                dif_cropped = calculate_cropped_diff(substack1, substack2, x, y)
+                tmp_avg = np.average(dif_cropped)
+                if tmp_avg < minv:
+                    minv = tmp_avg
+                    minx = x
+                    miny = y
+
+        edge_x = None
+        edge_y = None
+
+        if minx == x_start:
+            edge_x = 'left'
+        elif minx == x_end - 1:
+            edge_x = 'right'
+        if miny == y_start:
+            edge_y = 'down'
+        elif miny == y_end - 1:
+            edge_y = 'up'
+
+        if not edge_x and not edge_y:
+            break  # Done: min is not on any edge
+
+        # Expand only where needed
+        if edge_x == 'left':
+            x_start -= step
+        elif edge_x == 'right':
+            x_end += step
+
+        if edge_y == 'down':
+            y_start -= step
+        elif edge_y == 'up':
+            y_end += step
+
+        expansions += 1
+
+    print("Total expansions ", expansions)
+
+    
     return np.array([[minx],[miny]]), minv
 
 def find_crop_coords(stack1, stack2):
@@ -118,23 +177,23 @@ def set_filepaths(mouse, region, start_session_id, session_order):
     raw_legacy = None
     
     if start_session_id == 1:
-        fn1 = constants.dir_path+constants.ALIGNMENT_FNAMES['thresh'].format(
+        fn1 = DIR_PATH+alignment_filenames['thresh'].format(
             mouse, region,sn[0]) +constants.IMG_EXT
-        raw1 = constants.dir_path+constants.ALIGNMENT_FNAMES['raw'].format(
+        raw1 = DIR_PATH+alignment_filenames['raw'].format(
             mouse, region,sn[0]) +constants.IMG_EXT
     elif start_session_id == 2:
-        raw_legacy = constants.path_for_icy+ constants.ALIGNMENT_FNAMES['raw'].format(
+        raw_legacy = ICY_PATH+ alignment_filenames['raw'].format(
             mouse, region,session_order[0]) + constants.IMG_EXT
-        fn0 = constants.res_dir_path+constants.ALIGNMENT_FNAMES['thresh'].format(
+        fn0 = RESULT_PATH+alignment_filenames['thresh'].format(
             mouse, region,session_order[0]) + constants.IMG_EXT
-        fn1 = constants.res_dir_path+constants.ALIGNMENT_FNAMES['thresh'].format(
+        fn1 = RESULT_PATH+alignment_filenames['thresh'].format(
             mouse, region,sn[0]) + constants.IMG_EXT
-        raw1 = constants.path_for_icy+constants.ALIGNMENT_FNAMES['raw'].format(
+        raw1 = ICY_PATH+alignment_filenames['raw'].format(
             mouse, region,sn[0]) + constants.IMG_EXT
     
-    fn2 = constants.dir_path+constants.ALIGNMENT_FNAMES['thresh'].format(
+    fn2 = DIR_PATH+alignment_filenames['thresh'].format(
         mouse, region,sn[1]) + constants.IMG_EXT
-    raw2 = constants.dir_path+constants.ALIGNMENT_FNAMES['raw'].format(
+    raw2 = DIR_PATH+alignment_filenames['raw'].format(
         mouse, region,sn[1]) + constants.IMG_EXT
     
     if not (path.exists(fn1) and path.exists(fn2)):
@@ -233,11 +292,11 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
     aligned1, aligned2, aligned_prev = align_stacks(orig[0], orig[1], optimal_translations, 
                                                minz, start_session_id, prev_stack = prev_img)
     save_results(aligned1, aligned2, optimal_translations, minz, 
-                 start_session_id, mouse, region, constants.res_dir_path, 
-                 constants.ALIGNMENT_FNAMES['thresh'], file_suffix, session_order)
+                 start_session_id, mouse, region, RESULT_PATH, 
+                 alignment_filenames['thresh'], file_suffix, session_order)
     
-    save_single_img(constants.res_dir_path
-                    +constants.ALIGNMENT_FNAMES['thresh'].format(mouse, region,session_order[0])
+    save_single_img(RESULT_PATH
+                    +alignment_filenames['thresh'].format(mouse, region,session_order[0])
                     +constants.IMG_EXT,
                     aligned_prev)
         
@@ -245,27 +304,26 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
                                                                optimal_translations, minz, 
                                                      start_session_id, prev_stack = raw_prev_img)
 
-    save_single_img(constants.path_for_icy
-                    +constants.ALIGNMENT_FNAMES['raw'].format(mouse, region,session_order[0])
+    save_single_img(ICY_PATH
+                    +alignment_filenames['raw'].format(mouse, region,session_order[0])
                     +constants.IMG_EXT,
                     pev_raw_aligned)
     
     save_results(aligned1_raw, aligned2_raw, optimal_translations, minz, 
-                 start_session_id, mouse, region, constants.path_for_icy,
-                 constants.ALIGNMENT_FNAMES['raw'], file_suffix,session_order, to_csv = False)
+                 start_session_id, mouse, region, ICY_PATH,
+                 alignment_filenames['raw'], file_suffix,session_order, to_csv = False)
     
 #%%
 
 def align_all_sessions(m,r, session_order, bounds=[0,0]):
     #print(m, r, session_order)
-    for start_img_id in [1,2]:
+    for start_img_id in range(1, len(session_order)+1):
         suff = "_" + str(session_order[start_img_id-1]) + "_" + str(session_order[start_img_id])
         align_sessions(m, r, start_img_id, suff, session_order, bounds=bounds)
         print("-------------------------------------")
         
 #%%
-align_all_sessions(11,1,["ret1", "ret2", "ret3"], bounds=[0,0])
+align_all_sessions(8,1,group_session_order, bounds=[0,0])
 #%%
-
 
 

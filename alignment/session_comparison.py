@@ -29,14 +29,11 @@ with open(config_file, "r") as file:
     config = yaml.safe_load(file)
 
 #%%
-regions = constants.LANDMARK_REGIONS#[[2,1],[3,2],[4,2],[6,2], [7,1], [11,1], [14,1]]
-regions = constants.CTX_REGIONS
-
-#%%
-
 DIR_PATH = config["experiment"]["full_path"]
-group_session_order = ["landmark", "ctx1", "ctx2"]
-group_session_order = ["ctx", "landmark1", "landmark2"]
+
+
+regions = config["experiment"]["regions"][0]
+group_session_order = config["experiment"]["session_order"][0]
 
 #%% plot number of active cells in each session
 

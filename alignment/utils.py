@@ -11,18 +11,23 @@ from skimage import io
 import numpy as np
 import math
 
-def read_single_session_cell_data(mouse, region, sessions):
+def read_single_session_cell_data(mouse, region, sessions, config, test=False):
+    DIR_PATH = config["experiment"]["dir_path"]
+    ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
     ret = []
     for s in sessions:
-        df = pd.read_csv(constants.path_for_icy + constants.FILENAMES['cell_data_fn_template']
+        df = pd.read_csv(ICY_PATH + config['filenames']['cell_data_fn_template']
                              .format(mouse, region, s), "\t", header=1)
+        if test:
+            df = df.loc[(df[constants.ICY_COLNAMES['zcol']]>10) & (df[constants.ICY_COLNAMES['zcol']]<20)]
+
         if len(sessions) == 1:
             return df
         ret += [df]
     return ret
     
         
-def read_image(mouse, region, session, watershed = False):
+def read_image(mouse, region, session, config, watershed = False):
     if watershed:
         return io.imread(constants.dir_path + constants.FILENAMES['watershed_img_fn_template']
                          .format(mouse, region, session))
@@ -30,8 +35,10 @@ def read_image(mouse, region, session, watershed = False):
     print("img path", constants.path_for_icy + constants.FILENAMES['img_fn_template']
                      .format(mouse, region, session))
     '''
-    return io.imread(constants.path_for_icy + constants.FILENAMES['img_fn_template']
-                     .format(mouse, region, session))
+    
+    img_path = config["experiment"]["dir_path"] + config["experiment"]["path_for_icy"] + config["filenames"]['img_fn_template'].format(mouse, region, session)
+    print(img_path)
+    return io.imread(img_path)
 
 def top_intensity_from_file(mouse, region):
     top_df = pd.read_csv(constants.dir_path +"m" + str(mouse)+"_r"+str(region)+"_top.csv")
