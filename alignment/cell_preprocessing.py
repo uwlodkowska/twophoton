@@ -11,7 +11,8 @@ from skimage import io
 from constants import ICY_COLNAMES
 import constants
 from concurrent.futures import ProcessPoolExecutor
-
+from scipy.spatial import cKDTree
+from concurrent.futures import ThreadPoolExecutor
 
 def calculate_disk(coords, radius, disk_no, img):
     center_z = coords[ICY_COLNAMES['zcol']]+disk_no
@@ -131,7 +132,13 @@ def calculate_integral_image(stack):
     integral_volume = np.array([img.cumsum(axis=0, dtype=np.int64).cumsum(axis=1, dtype=np.int64) for img in stack])
     return integral_volume
 
-
+def find_active_cells(df, bgr, k_std):
+    for i in range(3):
+        b_mean = bgr[i][0]
+        b_std = bgr[i][1]
+        threshold = b_mean + k_std * b_std
+        df[f'active{i}'] = df[f"int_optimized{i}"] > threshold
+    return df
 
 # def optimize_centroid_position(args):
 #     """Optimize the position of a single centroid."""
@@ -190,7 +197,11 @@ def optimize_centroid_position(args):
 
     # Compute brightness in one batch
     brightness_values = np.array([calculate_intensity(x, y, z, img) for x, y, z in zip(new_x, new_y, new_z)])
-
+    # added for the purpose of method validation tests
+    if len(brightness_values) == 0:
+        return (0,)*4
+    
+    
     # Find the best shift
     best_idx = np.argmax(brightness_values)
     best_coords = (new_x[best_idx] - x_center, new_y[best_idx] - y_center, new_z[best_idx] - z_center)
@@ -245,38 +256,35 @@ def calculate_intensity_row(args):
 
 def calculate_background_intensity(df, img):
     """Calculate background intensity for a DataFrame using parallel processing."""
-    bg_df = pd.DataFrame()
-
-    # Copy the relevant coordinate columns
-    for cname in ICY_COLNAMES:
-        if 'col' in cname:
-            bg_df[ICY_COLNAMES[cname]] = df[ICY_COLNAMES[cname]]
     
+    bg_df = df[[ICY_COLNAMES[cname] for cname in ICY_COLNAMES if 'col' in cname]].copy()
     bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']] - constants.TOLERANCE
-    
 
-    # Compute cross product for background subtraction
-    cross_prod = bg_df.reset_index().merge(df, how="cross", suffixes=("_bg", "_df"))
-    cross_prod['distance'] = np.linalg.norm(
-        cross_prod[[n+"_bg" for n in constants.COORDS_3D]].values -
-        cross_prod[[n+"_df" for n in constants.COORDS_3D]].values, axis=1
-    )
-    cross_prod = cross_prod[cross_prod.distance < constants.TOLERANCE]
-    cross_prod = cross_prod.sort_values(by='distance', ascending=True)
-    cross_prod = cross_prod.drop_duplicates(subset=["index_bg"]).drop_duplicates(subset=["index_df"])
 
-    # Remove background points that are too close to the foreground
-    bg_df = bg_df.drop(np.array(cross_prod.index_bg))
-    # Prepare arguments for parallel processing
+
+    df_coords = df[constants.COORDS_3D].values
+    bg_coords = bg_df[constants.COORDS_3D].values
+
+    tree = cKDTree(df_coords)
+
+    # Identify background points too close to foreground
+    close_indices = tree.query_ball_point(bg_coords, r=constants.TOLERANCE)
+    too_close = [i for i, neighbors in enumerate(close_indices) if len(neighbors) > 0]
+
+    bg_df.drop(index=bg_df.index[too_close], inplace=True)
+
+    # Prepare data for parallel processing
     args_list = [(row, img) for _, row in bg_df.iterrows()]
 
-    # Parallel computation of background intensity
+
     with ProcessPoolExecutor() as executor:
         bg_df['bg_intensity'] = list(executor.map(calculate_intensity_row, args_list))
 
-    bg_df = bg_df.dropna()
 
-    return bg_df, cross_prod
+
+    bg_df.dropna(inplace=True)
+
+    return bg_df, None
     
 
 
