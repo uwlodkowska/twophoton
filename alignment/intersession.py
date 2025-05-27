@@ -11,7 +11,7 @@ import utils
 import constants
 import cell_preprocessing as cp
 import visualization
-
+from scipy.spatial import cKDTree
 
 def identify_persistent_cells(mouse, region, sessions, session_ids):
     #tu dodac standaryzacje intensity?
@@ -25,16 +25,43 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
     print("summed ", sessions[0].shape[0]+sessions[1].shape[0])
         
     
-    cross_prod = sessions[0].merge(sessions[1], how = "cross", suffixes=("_s1", "_s2"))
-    cross_prod['distance'] = np.linalg.norm(cross_prod[[n+"_s1" for n in constants.COORDS_3D]].values
-                                            -cross_prod[[n+"_s2" for n in constants.COORDS_3D]].values, axis=1)
-    cross_prod = cross_prod[cross_prod.distance < constants.TOLERANCE]
-    cross_prod = cross_prod.sort_values(by='distance', ascending=True)
-    cross_prod = cross_prod.drop_duplicates(subset=["index_s2"]).drop_duplicates(subset=["index_s1"])
+    coords_0 = sessions[0][constants.COORDS_3D].values
+    coords_1 = sessions[1][constants.COORDS_3D].values
+    
+    # Build KDTree for fast spatial search
+    tree_1 = cKDTree(coords_1)
+    matches = tree_1.query_ball_point(coords_0, r=constants.TOLERANCE)
+    
+    # Prepare lists to build the result DataFrame
+    rows_0, rows_1, distances = [], [], []
+    for i, idxs in enumerate(matches):
+        for j in idxs:
+            rows_0.append(i)
+            rows_1.append(j)
+            # Compute the distance (for sorting/filtering later)
+            dist = np.linalg.norm(coords_0[i] - coords_1[j])
+            distances.append(dist)
+    
+    if not rows_0:
+        print("No matching cells found within tolerance.")
+        return pd.concat(sessions), 0.0
+
+    # Build the result DataFrame
+    cross_prod = pd.DataFrame({
+        "index_s1": rows_0,
+        "index_s2": rows_1,
+        "distance": distances
+    })
+    
+    cross_prod = cross_prod.sort_values(by="distance", ascending=True)
+    cross_prod = cross_prod.drop_duplicates(subset=["index_s2"])
+    cross_prod = cross_prod.drop_duplicates(subset=["index_s1"])
     
     for cname in constants.COORDS_3D:
-        cross_prod[cname] = (cross_prod[cname+"_s1"]+cross_prod[cname+"_s2"])/2
-        cross_prod = cross_prod.drop(columns = [cname+"_s1",cname+"_s2"])
+        cross_prod[cname + "_s1"] = sessions[0].iloc[cross_prod["index_s1"]][cname].values
+        cross_prod[cname + "_s2"] = sessions[1].iloc[cross_prod["index_s2"]][cname].values
+        cross_prod[cname] = (cross_prod[cname + "_s1"] + cross_prod[cname + "_s2"]) / 2
+        cross_prod = cross_prod.drop(columns=[cname + "_s1", cname + "_s2"])
     
     print("duplicates ", cross_prod.shape[0])
     #print(np.array(cross_prod.index_s1))
@@ -45,12 +72,13 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
     print("duplicates removed ", summed.shape[0])
     cross_prod = cross_prod.drop(columns = ["index_s1","index_s2", "distance"])
     count = cross_prod.shape[0]/(cell_count-cross_prod.shape[0])
+    
     return summed, count 
 
 
-def pooled_cells(mouse, region, session_ids):
+def pooled_cells(mouse, region, session_ids, config, test=False):
     sessions = utils.read_single_session_cell_data(
-                                  mouse, region, session_ids)
+                                  mouse, region, session_ids, config, test=test)
     persistent, count = identify_persistent_cells(mouse, region, sessions[:2], [])
     print("first ct ", count)
     pooled, count = identify_persistent_cells(mouse, region, [persistent,sessions[-1]], [])
@@ -230,20 +258,81 @@ def cell_classes(df, sessions=[1,2,3], colname='active'):
     
     any_session = len(df.loc[(df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])])
                     | (df[colname+str(sessions[2])])])
-    class1 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+    class0 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
                     & (~df[colname+str(sessions[2])])])
-    class2 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+    class1 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
                     & (~df[colname+str(sessions[2])])])
-    class3 = len(df.loc[(~df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+    class2 = len(df.loc[(~df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])
+    class3 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
                     & (df[colname+str(sessions[2])])])
     class4 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
-                    & (df[colname+str(sessions[2])])])
-    class5 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
                     & (~df[colname+str(sessions[2])])])
-    class6 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+    class5 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
                     & (df[colname+str(sessions[2])])])
-    class7 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+    class6 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
                     & (df[colname+str(sessions[2])])])
-    ret = np.array([class1,class2,class3,class4,class5,class6,class7])/any_session
+    ret = np.array([class0,class1,class2,class3,class4,class5,class6])/any_session
+    #print(ret)
+    return ret
+
+def cell_classes_diff_norm_(df, sessions=[1,2,3], colname='active'):
+    
+    any_session = len(df.loc[(df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])])
+                    | (df[colname+str(sessions[2])])])
+    class0 = len(df.loc[(df[colname+str(sessions[0])])])/any_session
+    class1 = len(df.loc[(df[colname+str(sessions[1])])])/any_session
+    class2 = len(df.loc[(df[colname+str(sessions[2])])])/any_session
+    
+    class3 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/any_session
+    
+    either_session = len(df.loc[((df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])]))
+                    & (~df[colname+str(sessions[2])])])
+    class4 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (~df[colname+str(sessions[2])])])/either_session
+    either_session = len(df.loc[((df[colname+str(sessions[0])]) | (df[colname+str(sessions[2])]))
+                    & (~df[colname+str(sessions[1])])])
+    class5 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/either_session
+    either_session = len(df.loc[((df[colname+str(sessions[1])]) | (df[colname+str(sessions[2])]))
+                    & (~df[colname+str(sessions[0])])])
+    class6 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/either_session
+    ret = np.array([class0,class1,class2,class3,class4,class5,class6])
+    #print(ret)
+    return ret
+
+
+def cell_classes_diff_norm(df, sessions=[1,2,3], colname='active'):
+    
+    any_session = len(df.loc[(df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])])
+                    | (df[colname+str(sessions[2])])])
+    class0 = len(df.loc[(df[colname+str(sessions[0])]) & ~(df[colname+str(sessions[1])]
+                    & df[colname+str(sessions[2])])])/any_session
+    class1 = len(df.loc[(df[colname+str(sessions[1])]) & ~(df[colname+str(sessions[0])]
+                    & df[colname+str(sessions[2])])])/any_session
+    
+    class2 = len(df.loc[(df[colname+str(sessions[2])]) & ~(df[colname+str(sessions[0])]
+                    & df[colname+str(sessions[1])])])/any_session
+    
+    
+    
+    class3 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/any_session
+    
+    either_session = len(df.loc[((df[colname+str(sessions[0])]) | (df[colname+str(sessions[1])]))
+                    & (~df[colname+str(sessions[2])])])
+    class4 = len(df.loc[(df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (~df[colname+str(sessions[2])])])/either_session
+    either_session = len(df.loc[((df[colname+str(sessions[0])]) | (df[colname+str(sessions[2])]))
+                    & (~df[colname+str(sessions[1])])])
+    class5 = len(df.loc[(df[colname+str(sessions[0])]) & (~df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/either_session
+    either_session = len(df.loc[((df[colname+str(sessions[1])]) | (df[colname+str(sessions[2])]))
+                    & (~df[colname+str(sessions[0])])])
+    class6 = len(df.loc[(~df[colname+str(sessions[0])]) & (df[colname+str(sessions[1])])
+                    & (df[colname+str(sessions[2])])])/either_session
+    ret = np.array([class0,class1,class2,class3,class4,class5,class6])
     print(ret)
     return ret
