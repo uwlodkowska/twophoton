@@ -9,7 +9,7 @@ import sys
 import yaml
 
 #%%
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/ctx_landmark_rev.yaml"
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/test.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
@@ -24,6 +24,7 @@ regions = config["experiment"]["regions"][0]
 group_session_order = config["experiment"]["session_order"][0]
 
 alignment_filenames = config["alignment_filenames"]
+
 #%%
 def calculate_cropped_diff(substack1, substack2, x, y):
     xdif = min(substack1.shape[1], substack2.shape[1])-abs(x);
@@ -83,7 +84,7 @@ def find_optimal_crop(substack1, substack2):
 
         expansions += 1
 
-    print("Total expansions ", expansions)
+    #print("Total expansions ", expansions)
 
     
     return np.array([[minx],[miny]]), minv
@@ -173,15 +174,24 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
 #%%
 def set_filepaths(mouse, region, start_session_id, session_order):
     sn = session_order[start_session_id-1:start_session_id+1]
-    fn0 = None
-    raw_legacy = None
+    
+    empty_pre = len(session_order)-1-start_session_id
+    
+    if empty_pre == 0:
+        fn = []
+        raw = []
+    else:
+        fn = [None]*empty_pre
+        raw = [None]*empty_pre
     
     if start_session_id == 1:
-        fn1 = DIR_PATH+alignment_filenames['thresh'].format(
-            mouse, region,sn[0]) +constants.IMG_EXT
+        fn1 = DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[0]) +constants.IMG_EXT
+        fn1 = RESULT_PATH+alignment_filenames['thresh'].format(mouse, region,sn[0]) + constants.IMG_EXT
+        
+        
         raw1 = DIR_PATH+alignment_filenames['raw'].format(
             mouse, region,sn[0]) +constants.IMG_EXT
-    elif start_session_id == 2:
+    elif start_session_id > 1:
         raw_legacy = ICY_PATH+ alignment_filenames['raw'].format(
             mouse, region,session_order[0]) + constants.IMG_EXT
         fn0 = RESULT_PATH+alignment_filenames['thresh'].format(
@@ -199,6 +209,8 @@ def set_filepaths(mouse, region, start_session_id, session_order):
     if not (path.exists(fn1) and path.exists(fn2)):
         raise Exception("Wrong filenames for: ", fn1 )
 
+
+    print(fn0, fn1, fn2)
     return [fn0, fn1, fn2], [raw1, raw2], [raw_legacy]
 
 #%%
@@ -264,11 +276,11 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
     orig = read_images(thresh_names[1:], bounds = bounds)
     raw = read_images(raw_names, convert = False, bounds = bounds)
     
-    
+    print("raw names ", raw_names)
     prev_img = None
     raw_prev_img = None
     
-    if start_session_id == 2:
+    if start_session_id > 1:
         print("thresh names ", thresh_names)
         prev_img = read_images([thresh_names[0]])[0]
         raw_prev_img = read_images([prev_img_names[0]])[0]
@@ -317,13 +329,14 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
 
 def align_all_sessions(m,r, session_order, bounds=[0,0]):
     #print(m, r, session_order)
-    for start_img_id in range(1, len(session_order)+1):
+    for start_img_id in range(1, len(session_order)):
+        print("starting ", start_img_id, session_order)
         suff = "_" + str(session_order[start_img_id-1]) + "_" + str(session_order[start_img_id])
         align_sessions(m, r, start_img_id, suff, session_order, bounds=bounds)
         print("-------------------------------------")
         
 #%%
-align_all_sessions(8,1,group_session_order, bounds=[0,0])
+align_all_sessions(6,1,group_session_order, bounds=[0,0])
 #%%
 
 
