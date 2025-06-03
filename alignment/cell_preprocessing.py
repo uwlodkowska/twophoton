@@ -258,7 +258,7 @@ def calculate_background_intensity(df, img):
     """Calculate background intensity for a DataFrame using parallel processing."""
     
     bg_df = df[[ICY_COLNAMES[cname] for cname in ICY_COLNAMES if 'col' in cname]].copy()
-    bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']] - constants.TOLERANCE
+    bg_df[ICY_COLNAMES['zcol']] = df[ICY_COLNAMES['zcol']] - constants.TOLERANCE - 0.1
 
 
 

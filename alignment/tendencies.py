@@ -52,7 +52,34 @@ import psutil, os
 def print_mem_usage():
     print("RAM used (MB):", psutil.Process(os.getpid()).memory_info().rss // 1024 // 1024)
 
+#%% BACKGROUND DATA CALCULATION
+regions=[[0,1]]
 
+for m,r in regions:
+    if m == 2:
+        continue
+    bgrv = []
+    imgs = [utils.read_image(m, r, i, config) for i in group_session_order]#[1,2,3]]
+    df = pd.read_csv(DIR_PATH.format(m=m, r=r))
+    for i,img in enumerate(imgs):
+        bgr,cprod = cp.calculate_background_intensity(df, img)
+        b_mean = np.mean(bgr.bg_intensity)
+        b_std = np.std(bgr.bg_intensity)
+        bgrv += [[b_mean, b_std]]
+    idx_arr = []
+    bgr_data = pd.read_csv(BGR_DIR)
+    
+    d = dict.fromkeys(bgr_data.columns, 0)
+    d['m'] = m
+    d['r'] = r 
+    for i, bgr in enumerate(bgrv):
+        d[f'mean{i}'] = bgr[0]
+        d[f'sdev{i}'] = bgr[1]
+
+    bgr_data.loc[len(bgr_data)] = d
+
+    bgr_data.drop(columns="Unnamed: 0", inplace=True)
+    bgr_data.to_csv(BGR_DIR)
 #%%
 #regions = [[2,1],[3,2],[4,2],[6,2], [7,1], [11,1], [14,1]]
 #regions = constants.LANDMARK_REGIONS + CTX_REGIONS
@@ -127,32 +154,7 @@ for m,r in regions:
     for i, session_id in enumerate(group_session_order):
         img = utils.read_image(m, r, session_id, config)
 
-#%% BACKGROUND DATA CALCULATION
-for m,r in regions:
-    if m == 2:
-        continue
-    bgrv = []
-    imgs = [utils.read_image(m, r, i, config) for i in group_session_order]#[1,2,3]]
-    df = pd.read_csv(DIR_PATH.format(m=m, r=r))
-    for i,img in enumerate(imgs):
-        bgr,cprod = cp.calculate_background_intensity(df, img)
-        b_mean = np.mean(bgr.bg_intensity)
-        b_std = np.std(bgr.bg_intensity)
-        bgrv += [[b_mean, b_std]]
-    idx_arr = []
-    bgr_data = pd.read_csv(BGR_DIR)
-    
-    d = dict.fromkeys(bgr_data.columns, 0)
-    d['m'] = m
-    d['r'] = r 
-    for i, bgr in enumerate(bgrv):
-        d[f'mean{i}'] = bgr[0]
-        d[f'sdev{i}'] = bgr[1]
 
-    bgr_data.loc[len(bgr_data)] = d
-
-    bgr_data.drop(columns="Unnamed: 0", inplace=True)
-    bgr_data.to_csv(BGR_DIR)
 
 
 #%% HELPER FUNCTIONS FOR PLOTTING TENDENCIES
@@ -169,13 +171,13 @@ def plot_tendencies(tendencies, title):
     plt.figure(figsize=(6, 4))
     groups = ['up', 'down', 'stable']
     for i in range(3):
-        plt.plot(x_vals, means[:, i], marker='o', linestyle='-', color=colors[i], label=groups[i])
-        plt.fill_between(x_vals, means[:, i] - stds[:, i], means[:, i] + stds[:, i], color=colors[i], alpha=0.2)
-
+        plt.plot(x_vals, means[:, i][::-1], marker='o', linestyle='-', color=colors[i], label=groups[i])
+        plt.fill_between(x_vals, means[:, i][::-1] - stds[:, i][::-1], means[:, i][::-1] + stds[:, i][::-1], color=colors[i], alpha=0.2)
+    #plt.ylim(0,0.5)
     plt.xlabel('n='+str(len(tendencies)))
     plt.ylabel('Value')
     plt.title(title)
-    plt.xticks([0, 1], ['different', 'same'])
+    plt.xticks([0, 1], ['landmark-ctx', 'landmark-landmark'])
     plt.legend()
     plt.show()
 #%% BARPLOT TENDENCIES
@@ -279,8 +281,8 @@ for m,r in [[0,1]]:#config["experiment"]["regions"][0]:
 tendencies = np.array(tendencies_on_off)
 tendencies = np.array([tendencies[i]/st for i, st in enumerate(any_session)])
 
-plot_tendencies(tendencies, "On/off cells, threshold mean+6*std background - ctx/landmark pooled")
-plot_tendencies_b(tendencies, "Cell classes for CLL group")
+plot_tendencies(tendencies, "fake data")
+#plot_tendencies_b(tendencies, "Cell classes for CLL group")
 #%%
 
 pooled_df = []  # List to collect sampled DataFrames
