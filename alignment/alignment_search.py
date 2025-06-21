@@ -119,18 +119,20 @@ def calc_adj_translation(max_tr, curr_trans, direction):
     #do sprawdzenia nawiasy cuda wianki
     return int(max(0, (max(0, max_tr * direction) + max_tr-curr_trans)))
 
-def truncate_along_z(stack1, stack2, prev_stack, minz):
-    print("minz ", minz)
+def truncate_along_z(stack1, stack2, prev_stacks, minz):
+    print("minz ", minz, "stack shape ", stack1.shape)
     z1 = stack1.shape[0]
     z2 = stack2.shape[0]
     res1 = stack1[max(0,minz) : min(z1, z2+minz)]
     res2 = stack2[max(0,-minz) : min(z1-minz, z2)]
-    if prev_stack is not None:
-        prev_stack = prev_stack[max(0,minz) : min(z1, z2+minz)];
-    return [res1, res2, prev_stack]
+    
+    if prev_stacks is not None:
+        for i in range(len(prev_stacks)):
+            prev_stacks[i] = prev_stacks[i][max(0,minz) : min(z1, z2+minz)];
+    return [res1, res2, prev_stacks]
 
-def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_stack = None):
-    z_truncated = truncate_along_z(orig1, orig2, prev_stack, minz)
+def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_stacks = None):
+    z_truncated = truncate_along_z(orig1, orig2, prev_stacks, minz)
 
     print("start image id ", start_img_id)
 
@@ -145,16 +147,13 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
     ret1 = np.empty((z_truncated[0].shape[0], difx, dify))
     ret2 = np.empty_like(ret1)
     
-    prev_ret = None
-    prev_stack = z_truncated[-1]
-    if prev_stack is not None:
-        prev_ret = np.empty_like(ret1)
-    #     print(prev_stack.shape)
-    #     prev_stack = prev_stack[max(0,minz) : min(orig1.shape[0], orig2.shape[0]+minz)]
-    #     print(prev_stack.shape, ret1.shape)
-    #     
-        
+    prev_ret = []
+    prev_stacks = z_truncated[-1]
     
+    if prev_stacks is not None:
+        for prev_stack in prev_stacks:
+            prev_ret += [np.empty_like(ret1)]
+
     x0 = [calc_adj_translation(max_transx,x, -1) for x in optimal_translations[0]]
     y0 = [calc_adj_translation(max_transy,y, -1) for y in optimal_translations[1]]
     
@@ -166,58 +165,37 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
         if tr_idx >= len(x0):
             tr_idx = len(x0) - 1
         ret1[idx] =  r1[x0_b:x0_b+difx,y0_b:y0_b+dify]
-        if prev_stack is not None:
-            prev_ret[idx] = prev_stack[idx][x0_b:x0_b+difx,y0_b:y0_b+dify]
+        if prev_stacks is not None:
+            for i, prev_stack in enumerate(prev_stacks):
+                prev_ret[i][idx] = prev_stack[idx][x0_b:x0_b+difx,y0_b:y0_b+dify]
         ret2[idx] =  r2[x0[tr_idx]:x0[tr_idx]+difx,y0[tr_idx]:y0[tr_idx]+dify]
     return ret1, ret2, prev_ret
 
 #%%
 def set_filepaths(mouse, region, start_session_id, session_order):
-    sn = session_order[start_session_id-1:start_session_id+1]
+    sn = session_order[:start_session_id+1]
     
     empty_pre = len(session_order)-1-start_session_id
     
-    if empty_pre == 0:
-        fn = []
-        raw = []
-    else:
-        fn = [None]*empty_pre
-        raw = [None]*empty_pre
-    
-    if start_session_id == 1:
-        fn1 = DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[0]) +constants.IMG_EXT
-        fn1 = RESULT_PATH+alignment_filenames['thresh'].format(mouse, region,sn[0]) + constants.IMG_EXT
-        
-        
-        raw1 = DIR_PATH+alignment_filenames['raw'].format(
-            mouse, region,sn[0]) +constants.IMG_EXT
-    elif start_session_id > 1:
-        raw_legacy = ICY_PATH+ alignment_filenames['raw'].format(
-            mouse, region,session_order[0]) + constants.IMG_EXT
-        fn0 = RESULT_PATH+alignment_filenames['thresh'].format(
-            mouse, region,session_order[0]) + constants.IMG_EXT
-        fn1 = RESULT_PATH+alignment_filenames['thresh'].format(
-            mouse, region,sn[0]) + constants.IMG_EXT
-        raw1 = ICY_PATH+alignment_filenames['raw'].format(
-            mouse, region,sn[0]) + constants.IMG_EXT
-    
-    fn2 = DIR_PATH+alignment_filenames['thresh'].format(
-        mouse, region,sn[1]) + constants.IMG_EXT
-    raw2 = DIR_PATH+alignment_filenames['raw'].format(
-        mouse, region,sn[1]) + constants.IMG_EXT
-    
-    if not (path.exists(fn1) and path.exists(fn2)):
-        raise Exception("Wrong filenames for: ", fn1 )
+    fn = []
+    raw = []
 
+    try:    
+        for i in range(start_session_id+1):
+            fn += [DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[i]) +constants.IMG_EXT]
+            raw += [DIR_PATH+alignment_filenames['raw'].format(mouse, region,sn[i]) +constants.IMG_EXT]        
+    except:
+        raise Exception("Wrong filenames for: ", sn)
 
-    print(fn0, fn1, fn2)
-    return [fn0, fn1, fn2], [raw1, raw2], [raw_legacy]
+    print(fn)
+    return fn, raw
 
 #%%
 def read_images(name_list, convert=True, bounds=[0,0]):
     ret = []
     for fn in name_list:
         if fn is not None:
+            print(fn)
             new_img = io.imread(fn)
             print(new_img.shape)
             new_img = new_img[bounds[0]:len(new_img)-bounds[1]]
@@ -265,26 +243,28 @@ def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, re
 def save_single_img(img_path, image):
     if image is not None:
         image = prepare_for_tif_save(image)
+        print("to be saved at ", img_path)
         tifffile.imwrite(img_path, image, imagej=True, metadata={'unit': 'pixels','axes': 'ZCYX'})
 
 #%%
 
 def align_sessions(mouse, region, start_session_id, file_suffix, session_order, bounds=[0,0]):
-    thresh_names, raw_names, prev_img_names = set_filepaths(
+    thresh_names, raw_names = set_filepaths(
         mouse, region, start_session_id, session_order)
     print("align_session_params ", mouse, region, start_session_id, file_suffix)
-    orig = read_images(thresh_names[1:], bounds = bounds)
+    
+    print("orig_names ", thresh_names[-2:])
+    orig = read_images(thresh_names[-2:], bounds = bounds)
     raw = read_images(raw_names, convert = False, bounds = bounds)
     
     print("raw names ", raw_names)
-    prev_img = None
-    raw_prev_img = None
-    
+    prev_imgs = None
+    raw_prev_imgs = None
+    #TODO wczytywac raz
     if start_session_id > 1:
-        print("thresh names ", thresh_names)
-        prev_img = read_images([thresh_names[0]])[0]
-        raw_prev_img = read_images([prev_img_names[0]])[0]
-        
+        prev_imgs = read_images(thresh_names[:start_session_id-1])
+        raw_prev_imgs = read_images(raw_names[:start_session_id-1])
+        print("start session id ", start_session_id, "prev list size", len(prev_imgs))
     z1 = orig[0].shape[0]
     z2 = orig[1].shape[0]
     
@@ -302,24 +282,26 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
             optimal_translations = coords_list
             minz = z
     aligned1, aligned2, aligned_prev = align_stacks(orig[0], orig[1], optimal_translations, 
-                                               minz, start_session_id, prev_stack = prev_img)
+                                               minz, start_session_id, prev_stacks = prev_imgs)
     save_results(aligned1, aligned2, optimal_translations, minz, 
                  start_session_id, mouse, region, RESULT_PATH, 
                  alignment_filenames['thresh'], file_suffix, session_order)
     
-    save_single_img(RESULT_PATH
-                    +alignment_filenames['thresh'].format(mouse, region,session_order[0])
-                    +constants.IMG_EXT,
-                    aligned_prev)
+    for i, previous_img in enumerate(aligned_prev):
+        save_single_img(RESULT_PATH
+                        +alignment_filenames['thresh'].format(mouse, region,session_order[i])
+                        +constants.IMG_EXT,
+                        previous_img)
         
     aligned1_raw, aligned2_raw, pev_raw_aligned = align_stacks(raw[0], raw[1], 
                                                                optimal_translations, minz, 
-                                                     start_session_id, prev_stack = raw_prev_img)
+                                                     start_session_id, prev_stacks = raw_prev_imgs)
 
-    save_single_img(ICY_PATH
-                    +alignment_filenames['raw'].format(mouse, region,session_order[0])
-                    +constants.IMG_EXT,
-                    pev_raw_aligned)
+    for previous_img in pev_raw_aligned:
+        save_single_img(ICY_PATH
+                        +alignment_filenames['raw'].format(mouse, region,session_order[0])
+                        +constants.IMG_EXT,
+                        previous_img)
     
     save_results(aligned1_raw, aligned2_raw, optimal_translations, minz, 
                  start_session_id, mouse, region, ICY_PATH,
@@ -338,5 +320,7 @@ def align_all_sessions(m,r, session_order, bounds=[0,0]):
 #%%
 align_all_sessions(6,1,group_session_order, bounds=[0,0])
 #%%
-
-
+from tifffile import TiffFile
+with TiffFile("/media/ula/DATADRIVE1/fos_gfp_tmaze/multisession/despeckle/alignment_result/m6r1_s0_cropped_spots.tif") as tif:
+    print(tif.series)
+    tif.asarray()
