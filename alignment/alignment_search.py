@@ -84,7 +84,6 @@ def find_optimal_crop(substack1, substack2):
 
         expansions += 1
 
-    #print("Total expansions ", expansions)
 
     
     return np.array([[minx],[miny]]), minv
@@ -131,6 +130,7 @@ def truncate_along_z(stack1, stack2, prev_stacks, minz):
             prev_stacks[i] = prev_stacks[i][max(0,minz) : min(z1, z2+minz)];
     return [res1, res2, prev_stacks]
 
+
 def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_stacks = None):
     z_truncated = truncate_along_z(orig1, orig2, prev_stacks, minz)
 
@@ -146,7 +146,7 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
 
     ret1 = np.empty((z_truncated[0].shape[0], difx, dify))
     ret2 = np.empty_like(ret1)
-    
+
     prev_ret = []
     prev_stacks = z_truncated[-1]
     
@@ -154,6 +154,7 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
         for prev_stack in prev_stacks:
             prev_ret += [np.empty_like(ret1)]
 
+        
     x0 = [calc_adj_translation(max_transx,x, -1) for x in optimal_translations[0]]
     y0 = [calc_adj_translation(max_transy,y, -1) for y in optimal_translations[1]]
     
@@ -166,9 +167,10 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
             tr_idx = len(x0) - 1
         ret1[idx] =  r1[x0_b:x0_b+difx,y0_b:y0_b+dify]
         if prev_stacks is not None:
-            for i, prev_stack in enumerate(prev_stacks):
-                prev_ret[i][idx] = prev_stack[idx][x0_b:x0_b+difx,y0_b:y0_b+dify]
+            for i in range(len(prev_stacks)):
+                prev_ret[i][idx] = prev_stacks[i][idx][x0_b:x0_b+difx,y0_b:y0_b+dify]
         ret2[idx] =  r2[x0[tr_idx]:x0[tr_idx]+difx,y0[tr_idx]:y0[tr_idx]+dify]
+
     return ret1, ret2, prev_ret
 
 #%%
@@ -181,13 +183,20 @@ def set_filepaths(mouse, region, start_session_id, session_order):
     raw = []
 
     try:    
-        for i in range(start_session_id+1):
-            fn += [DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[i]) +constants.IMG_EXT]
-            raw += [DIR_PATH+alignment_filenames['raw'].format(mouse, region,sn[i]) +constants.IMG_EXT]        
+        for i in range(start_session_id-1):
+            fn += [RESULT_PATH+alignment_filenames['thresh'].format(mouse, region,sn[i]) +constants.IMG_EXT]
+            raw += [ICY_PATH+alignment_filenames['raw'].format(mouse, region,sn[i]) +constants.IMG_EXT]
+        if start_session_id == 1:
+            fn += [DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[start_session_id-1]) +constants.IMG_EXT]
+            raw += [DIR_PATH+alignment_filenames['raw'].format(mouse, region,sn[start_session_id-1]) +constants.IMG_EXT]  
+        else:
+            fn += [RESULT_PATH+alignment_filenames['thresh'].format(mouse, region,sn[start_session_id-1]) +constants.IMG_EXT]
+            raw += [ICY_PATH+alignment_filenames['raw'].format(mouse, region, sn[start_session_id-1]) +constants.IMG_EXT]
+        fn += [DIR_PATH+alignment_filenames['thresh'].format(mouse, region,sn[start_session_id]) +constants.IMG_EXT]
+        raw += [DIR_PATH+alignment_filenames['raw'].format(mouse, region, sn[start_session_id]) +constants.IMG_EXT]
     except:
         raise Exception("Wrong filenames for: ", sn)
 
-    print(fn)
     return fn, raw
 
 #%%
@@ -195,11 +204,8 @@ def read_images(name_list, convert=True, bounds=[0,0]):
     ret = []
     for fn in name_list:
         if fn is not None:
-            print(fn)
             new_img = io.imread(fn)
-            print(new_img.shape)
             new_img = new_img[bounds[0]:len(new_img)-bounds[1]]
-            print(new_img.shape)
             
             if convert:
                 ret += [new_img.astype("uint8")]
@@ -217,6 +223,7 @@ def prepare_for_tif_save(image):
 
 def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, region, 
                  res_dir,fname_template, file_suffix,session_order,  to_csv=True):
+    
     ret1 = prepare_for_tif_save(ret1)
     ret2 = prepare_for_tif_save(ret2)
     findif = abs(ret1-ret2)
@@ -231,7 +238,7 @@ def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, re
                      metadata={'unit': 'pixels','axes': 'ZCYX'})
     tifffile.imwrite(res_dir+"m"+str(mouse)+"r"+str(region)+"_"+file_suffix
                      + constants.IMG_EXT,findif,imagej=True, metadata={'unit': 'pixels','axes': 'ZCYX'})
-    
+
     if to_csv:
         with open(res_dir+"m"+str(mouse)+"r"+str(region)+"_"+str(start_img_id)+file_suffix+ '.csv', 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
@@ -243,7 +250,6 @@ def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, re
 def save_single_img(img_path, image):
     if image is not None:
         image = prepare_for_tif_save(image)
-        print("to be saved at ", img_path)
         tifffile.imwrite(img_path, image, imagej=True, metadata={'unit': 'pixels','axes': 'ZCYX'})
 
 #%%
@@ -253,18 +259,16 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
         mouse, region, start_session_id, session_order)
     print("align_session_params ", mouse, region, start_session_id, file_suffix)
     
-    print("orig_names ", thresh_names[-2:])
     orig = read_images(thresh_names[-2:], bounds = bounds)
-    raw = read_images(raw_names, convert = False, bounds = bounds)
-    
-    print("raw names ", raw_names)
+    raw = read_images(raw_names[-2:], convert = False, bounds = bounds)
+
     prev_imgs = None
     raw_prev_imgs = None
     #TODO wczytywac raz
     if start_session_id > 1:
         prev_imgs = read_images(thresh_names[:start_session_id-1])
         raw_prev_imgs = read_images(raw_names[:start_session_id-1])
-        print("start session id ", start_session_id, "prev list size", len(prev_imgs))
+
     z1 = orig[0].shape[0]
     z2 = orig[1].shape[0]
     
@@ -297,9 +301,9 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
                                                                optimal_translations, minz, 
                                                      start_session_id, prev_stacks = raw_prev_imgs)
 
-    for previous_img in pev_raw_aligned:
+    for  i, previous_img in enumerate(pev_raw_aligned):
         save_single_img(ICY_PATH
-                        +alignment_filenames['raw'].format(mouse, region,session_order[0])
+                        +alignment_filenames['raw'].format(mouse, region,session_order[i])
                         +constants.IMG_EXT,
                         previous_img)
     
@@ -320,7 +324,4 @@ def align_all_sessions(m,r, session_order, bounds=[0,0]):
 #%%
 align_all_sessions(6,1,group_session_order, bounds=[0,0])
 #%%
-from tifffile import TiffFile
-with TiffFile("/media/ula/DATADRIVE1/fos_gfp_tmaze/multisession/despeckle/alignment_result/m6r1_s0_cropped_spots.tif") as tif:
-    print(tif.series)
-    tif.asarray()
+
