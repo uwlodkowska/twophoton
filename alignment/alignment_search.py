@@ -4,12 +4,11 @@ import numpy as np
 import constants
 from skimage import io
 import tifffile, csv
-from os import path
 import sys
 import yaml
 
 #%%
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/test.yaml"
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
@@ -21,7 +20,7 @@ ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
 
 
 regions = config["experiment"]["regions"][0]
-group_session_order = config["experiment"]["session_order"][0]
+group_session_order = config["experiment"]["session_order"][0][:4]
 
 alignment_filenames = config["alignment_filenames"]
 
@@ -83,7 +82,8 @@ def find_optimal_crop(substack1, substack2):
             y_end += step
 
         expansions += 1
-
+        
+    print(f"range after expansions x {x_start}, {x_end}, y {y_start}, {y_end}")
 
     
     return np.array([[minx],[miny]]), minv
@@ -98,12 +98,12 @@ def find_crop_coords(stack1, stack2):
         stop_idx = start_idx + constants.ALIGNMENT_SUBSTACK_SIZE
         if stop_idx + constants.ALIGNMENT_SUBSTACK_SIZE > stack_size:
             stop_idx = stack_size+1
+        
         coords, sub_avg = find_optimal_crop(stack1[start_idx:stop_idx], 
                                             stack2[start_idx:stop_idx])
         sum_of_avgs += sub_avg
         translations = np.append(translations, coords, axis = 1)
         start_idx = stop_idx
-    print("trans", translations)
     return translations, sum_of_avgs
 
 def find_dims_post_alignment(orig_dim1, orig_dim2, translation_arr):
@@ -177,7 +177,6 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
 def set_filepaths(mouse, region, start_session_id, session_order):
     sn = session_order[:start_session_id+1]
     
-    empty_pre = len(session_order)-1-start_session_id
     
     fn = []
     raw = []
@@ -200,12 +199,12 @@ def set_filepaths(mouse, region, start_session_id, session_order):
     return fn, raw
 
 #%%
-def read_images(name_list, convert=True, bounds=[0,0]):
+def read_images(name_list, convert=True):
     ret = []
     for fn in name_list:
         if fn is not None:
             new_img = io.imread(fn)
-            new_img = new_img[bounds[0]:len(new_img)-bounds[1]]
+            #new_img = new_img[bounds[0]:len(new_img)-bounds[1]]
             
             if convert:
                 ret += [new_img.astype("uint8")]
@@ -254,13 +253,13 @@ def save_single_img(img_path, image):
 
 #%%
 
-def align_sessions(mouse, region, start_session_id, file_suffix, session_order, bounds=[0,0]):
+def align_sessions(mouse, region, start_session_id, file_suffix, session_order, partial=None):
     thresh_names, raw_names = set_filepaths(
         mouse, region, start_session_id, session_order)
     print("align_session_params ", mouse, region, start_session_id, file_suffix)
     
-    orig = read_images(thresh_names[-2:], bounds = bounds)
-    raw = read_images(raw_names[-2:], convert = False, bounds = bounds)
+    orig = read_images(thresh_names[-2:])
+    raw = read_images(raw_names[-2:], convert = False)
 
     prev_imgs = None
     raw_prev_imgs = None
@@ -279,12 +278,21 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
     for z in range(-constants.STACK_WINDOW, constants.STACK_WINDOW):
         tst1 = orig[0][max(0,z) : min(z1, z2+z)];
         tst2 = orig[1][max(0,-z) : min(z1-z, z2)];
-
+        
+        
+        if partial != None:
+            start_idx_x = (tst1.shape[1]-partial)//2
+            start_idx_y = (tst1.shape[2]-partial)//2
+            tst1 = tst1[:, start_idx_x:start_idx_x+partial, start_idx_y:start_idx_y+partial]
+            tst2 = tst2[:, start_idx_x:start_idx_x+partial, start_idx_y:start_idx_y+partial]
+        
         coords_list, sum_of_avgs = find_crop_coords(tst1, tst2)
+        
         if sum_of_avgs < optimal_sum_of_avgs:
             optimal_sum_of_avgs = sum_of_avgs
             optimal_translations = coords_list
             minz = z
+    print(f"Optimal translations list {optimal_translations}")
     aligned1, aligned2, aligned_prev = align_stacks(orig[0], orig[1], optimal_translations, 
                                                minz, start_session_id, prev_stacks = prev_imgs)
     save_results(aligned1, aligned2, optimal_translations, minz, 
@@ -313,15 +321,15 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
     
 #%%
 
-def align_all_sessions(m,r, session_order, bounds=[0,0]):
+def align_all_sessions(m,r, session_order, partial=None):
     #print(m, r, session_order)
     for start_img_id in range(1, len(session_order)):
         print("starting ", start_img_id, session_order)
         suff = "_" + str(session_order[start_img_id-1]) + "_" + str(session_order[start_img_id])
-        align_sessions(m, r, start_img_id, suff, session_order, bounds=bounds)
+        align_sessions(m, r, start_img_id, suff, session_order, partial)
         print("-------------------------------------")
         
 #%%
-align_all_sessions(6,1,group_session_order, bounds=[0,0])
+align_all_sessions(13,1,group_session_order, partial=None)
 #%%
 
