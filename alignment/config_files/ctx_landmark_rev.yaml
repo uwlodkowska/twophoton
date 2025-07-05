@@ -1,23 +1,23 @@
 experiment:
   name: "ctx_landmark"
-  dir_path: "/home/ula/multisession/despeckle/"
+  dir_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/2025_2p/despeckle/"
   full_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/m{m}r{r}.csv"
   res_dir_path: "alignment_result/"
   path_for_icy: "alignment_result/aligned_despeckle/"
   optimized_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/"
   background_dir: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/background.csv"
-  session_order: [['s0','landmark1', 'landmark2', 'ctx1', 'ctx2']]
-  regions: [[[6,1]]]
+  session_order: [['landmark1', 'landmark2', 'ctx1']]
+  regions: [[[1,1], [6,1], [9,2], [13,1], [14,1], [16,1]]]
 
 
 filenames:
-  cell_data_fn_template: "m{}r{}_{}_cropped_output.txt"
-  img_fn_template: "m{}r{}_{}_cropped.tif"
-  watershed_img_fn_template: "m{}r{}_{}_cropped_watershed.tif"
+  cell_data_fn_template: "m{}r{}_{}_output.txt"
+  img_fn_template: "m{}r{}_{}.tif"
+  watershed_img_fn_template: "m{}r{}_{}_watershed.tif"
 
 alignment_filenames:
-  thresh: "m{}r{}_{}_cropped_spots"
-  raw: "m{}r{}_{}_cropped"
+  thresh: "m{}r{}_{}_spots"
+  raw: "m{}r{}_{}"
 
 constants:
   tolerance: 5
