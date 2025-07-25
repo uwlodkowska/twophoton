@@ -11,9 +11,9 @@ experiment:
 
 
 filenames:
-  cell_data_fn_template: "m{}r{}_{}_cropped_output.txt"
-  img_fn_template: "m{}r{}_{}_cropped.tif"
-  watershed_img_fn_template: "m{}r{}_{}_cropped_watershed.tif"
+  cell_data_fn_template: "m{}r{}_{}_cropped_nc_output.txt"
+  img_fn_template: "m{}r{}_{}_cropped_nc.tif"
+  watershed_img_fn_template: "m{}r{}_{}_cropped_nc_watershed.tif"
 
 alignment_filenames:
   thresh: "m{}r{}_{}_cropped_spots"

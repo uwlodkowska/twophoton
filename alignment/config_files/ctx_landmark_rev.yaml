@@ -1,11 +1,11 @@
 experiment:
   name: "ctx_landmark"
-  dir_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/2025_2p/despeckle/"
-  full_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/m{m}r{r}.csv"
+  dir_path: "/mnt/data/fos_gfp_tmaze/2025_2p/despeckle/"
+  full_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/m{m}r{r}.csv"
   res_dir_path: "alignment_result/"
   path_for_icy: "alignment_result/aligned_despeckle/"
-  optimized_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/"
-  background_dir: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark_rev/background.csv"
+  optimized_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/"
+  background_dir: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/background.csv"
   session_order: [['landmark1', 'landmark2', 'ctx1']]
   regions: [[[1,1], [6,1], [9,2], [13,1], [14,1], [16,1]]]
 

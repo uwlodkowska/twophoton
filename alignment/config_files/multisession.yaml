@@ -1,17 +1,18 @@
 experiment:
   name: "ctx_landmark"
-  dir_path: "/mnt/data/fos_gfp_tmaze/multisession/despeckle/"
-  full_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/m{m}r{r}.csv"
+  dir_path: "/mnt/data/fos_gfp_tmaze/multisession/despeckle_nc/"
+  full_path: "/mnt/data/fos_gfp_tmaze/results/multisession_nc/m{m}r{r}.csv"
   res_dir_path: "alignment_result/"
   path_for_icy: "alignment_result/aligned_despeckle/"
-  optimized_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/"
-  background_dir: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark_rev/background.csv"
+  optimized_path: "/mnt/data/fos_gfp_tmaze/results/multisession_nc/"
+  background_dir: "/mnt/data/fos_gfp_tmaze/results/multisession_nc/background.csv"
   session_order: [['s0','landmark1', 'landmark2', 'ctx1', 'ctx2']]
   regions: [[[6,1]]]
 
 
 filenames:
   cell_data_fn_template: "m{}r{}_{}_output.txt"
+  cell_data_opt_template: "m{}r{}_{}_output_optimized.txt"
   img_fn_template: "m{}r{}_{}.tif"
   watershed_img_fn_template: "m{}r{}_{}_watershed.tif"
 
