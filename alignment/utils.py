@@ -11,13 +11,26 @@ from skimage import io
 import numpy as np
 import math
 
-def read_single_session_cell_data(mouse, region, sessions, config, test=False):
+def read_single_session_cell_data(mouse, region, sessions, config, test=False, optimized=False):
     DIR_PATH = config["experiment"]["dir_path"]
     ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
     ret = []
+    
+    if optimized:
+        fname = config['filenames']['cell_data_opt_template']
+        header_start = 0
+        sep = ","
+    else:
+        fname = config['filenames']['cell_data_fn_template']
+        header_start = 1
+        sep = "\t"
+    
     for s in sessions:
-        df = pd.read_csv(ICY_PATH + config['filenames']['cell_data_fn_template']
-                             .format(mouse, region, s), "\t", header=1)
+        df = pd.read_csv(
+            ICY_PATH + fname.format(mouse, region, s), 
+            sep=sep, 
+            header=header_start
+        )
         if test:
             df = df.loc[(df[constants.ICY_COLNAMES['zcol']]>10) & (df[constants.ICY_COLNAMES['zcol']]<20)]
 
