@@ -14,14 +14,16 @@ import visualization
 from scipy.spatial import cKDTree
 
 def identify_persistent_cells(mouse, region, sessions, session_ids):
-    #tu dodac standaryzacje intensity?
+    cols_to_save = constants.COORDS_3D + ["detected_in_sessions"]
+    
     if sessions is None:
         sessions = utils.read_single_session_cell_data(
                                   mouse, region, session_ids)
     cell_count = 0
     for i, s in enumerate(sessions):
+        #sprawdzić po co mi ten reset tutaj
+        sessions[i] = s[cols_to_save].reset_index()
         cell_count += s.shape[0]
-        sessions[i] = s[constants.COORDS_3D].reset_index()
     print("summed ", sessions[0].shape[0]+sessions[1].shape[0])
         
     
@@ -54,19 +56,24 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
     })
     
     cross_prod = cross_prod.sort_values(by="distance", ascending=True)
-    cross_prod = cross_prod.drop_duplicates(subset=["index_s2"])
     cross_prod = cross_prod.drop_duplicates(subset=["index_s1"])
+    cross_prod = cross_prod.drop_duplicates(subset=["index_s2"])
+    
     
     for cname in constants.COORDS_3D:
         cross_prod[cname + "_s1"] = sessions[0].iloc[cross_prod["index_s1"]][cname].values
         cross_prod[cname + "_s2"] = sessions[1].iloc[cross_prod["index_s2"]][cname].values
         cross_prod[cname] = (cross_prod[cname + "_s1"] + cross_prod[cname + "_s2"]) / 2
         cross_prod = cross_prod.drop(columns=[cname + "_s1", cname + "_s2"])
+
     
-    print("duplicates ", cross_prod.shape[0])
-    #print(np.array(cross_prod.index_s1))
-    
-    sessions[0] = sessions[0].drop(np.array(cross_prod.index_s1))
+    sessions[1] = sessions[1].drop(np.array(cross_prod.index_s2))
+
+    print(f"add sid {session_ids[-1]} to {sessions[0].loc[cross_prod['index_s1'], 'detected_in_sessions'].shape[0]} rows")
+    sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'] = \
+    sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'].apply(lambda s: s | {session_ids[-1]})
+    print(sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'].head()) 
+
     summed = pd.concat(sessions)
     print("summed ", summed.shape[0])
     print("duplicates removed ", summed.shape[0])
@@ -79,11 +86,18 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
 def pooled_cells(mouse, region, session_ids, config, test=False):
     sessions = utils.read_single_session_cell_data(
                                   mouse, region, session_ids, config, test=test)
-    persistent, count = identify_persistent_cells(mouse, region, sessions[:2], [])
+    #to filtrowanie pewnie trzeba przenieśc gdzieś
+    for i, session in enumerate(sessions):
+        session = session.loc[session["Interior (px)"]>150].copy()
+        session.loc[:,"detected_in_sessions"] = [{session_ids[i]} for _ in range(len(session))]
+        sessions[i] = session
+    
+    persistent, count = identify_persistent_cells(mouse, region, sessions[:2], session_ids[:2])
     print("first ct ", count)
-    pooled, count = identify_persistent_cells(mouse, region, [persistent,sessions[-1]], [])
-    print("second ct ",count)
-    return pooled
+    for i in range(2, len(session_ids)):
+        persistent, count = identify_persistent_cells(mouse, region, [persistent,sessions[i]], session_ids[:i+1])
+        print(f"{i}th ct ",count)
+    return persistent
 
 
 
