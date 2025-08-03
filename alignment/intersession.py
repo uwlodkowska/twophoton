@@ -11,18 +11,20 @@ import utils
 import constants
 import cell_preprocessing as cp
 import visualization
+import networkx as nx
 from scipy.spatial import cKDTree
 
 def identify_persistent_cells(mouse, region, sessions, session_ids):
     cols_to_save = constants.COORDS_3D + ["detected_in_sessions"]
     
     if sessions is None:
+        print("no sessions provided, reading")
         sessions = utils.read_single_session_cell_data(
                                   mouse, region, session_ids)
     cell_count = 0
     for i, s in enumerate(sessions):
         #sprawdzić po co mi ten reset tutaj
-        sessions[i] = s[cols_to_save].reset_index()
+        sessions[i] = s[cols_to_save].reset_index(drop=True)
         cell_count += s.shape[0]
     print("summed ", sessions[0].shape[0]+sessions[1].shape[0])
         
@@ -69,13 +71,13 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
     
     sessions[1] = sessions[1].drop(np.array(cross_prod.index_s2))
 
-    print(f"add sid {session_ids[-1]} to {sessions[0].loc[cross_prod['index_s1'], 'detected_in_sessions'].shape[0]} rows")
+
     sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'] = \
     sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'].apply(lambda s: s | {session_ids[-1]})
-    print(sessions[0].loc[cross_prod["index_s1"], 'detected_in_sessions'].head()) 
+
 
     summed = pd.concat(sessions)
-    print("summed ", summed.shape[0])
+    print("cprod ", cross_prod.shape[0])
     print("duplicates removed ", summed.shape[0])
     cross_prod = cross_prod.drop(columns = ["index_s1","index_s2", "distance"])
     count = cross_prod.shape[0]/(cell_count-cross_prod.shape[0])
@@ -83,11 +85,14 @@ def identify_persistent_cells(mouse, region, sessions, session_ids):
     return summed, count 
 
 
+
 def pooled_cells(mouse, region, session_ids, config, test=False):
     sessions = utils.read_single_session_cell_data(
-                                  mouse, region, session_ids, config, test=test)
+                                  mouse, region, session_ids, config, test=test, optimized=True)
     #to filtrowanie pewnie trzeba przenieśc gdzieś
     for i, session in enumerate(sessions):
+#        session = shift_optimized(session, i)
+        
         session = session.loc[session["Interior (px)"]>150].copy()
         session.loc[:,"detected_in_sessions"] = [{session_ids[i]} for _ in range(len(session))]
         sessions[i] = session
@@ -95,6 +100,7 @@ def pooled_cells(mouse, region, session_ids, config, test=False):
     persistent, count = identify_persistent_cells(mouse, region, sessions[:2], session_ids[:2])
     print("first ct ", count)
     for i in range(2, len(session_ids)):
+        print("adding ", session_ids[i])
         persistent, count = identify_persistent_cells(mouse, region, [persistent,sessions[i]], session_ids[:i+1])
         print(f"{i}th ct ",count)
     return persistent
@@ -350,3 +356,261 @@ def cell_classes_diff_norm(df, sessions=[1,2,3], colname='active'):
     ret = np.array([class0,class1,class2,class3,class4,class5,class6])
     print(ret)
     return ret
+
+
+from scipy.ndimage import gaussian_filter
+
+def recluster_component(component_df, coords_cols, session_col="detected_in_sessions",
+                        tolerance_um=5.0, voxel_size=np.array([1.18, 1.18, 2.0])):
+    """
+    Recluster a suspicious component using lower distance threshold.
+    Returns a list of DataFrames, one per subcomponent.
+    """
+    coords = component_df[coords_cols].values
+    scaled_coords = coords * voxel_size
+
+    tree = cKDTree(scaled_coords)
+    neighbors = tree.query_ball_tree(tree, r=tolerance_um)
+
+    G = nx.Graph()
+    G.add_nodes_from(component_df.index)
+
+    for i, nlist in enumerate(neighbors):
+        for j in nlist:
+            if i >= j:
+                continue
+            if list(component_df.iloc[i][session_col])[0] != list(component_df.iloc[j][session_col])[0]:
+                G.add_edge(component_df.index[i], component_df.index[j])
+
+    subcomponents = []
+    for nodes in nx.connected_components(G):
+        sub_df = component_df.loc[list(nodes)].copy()
+        subcomponents.append(sub_df)
+
+    return subcomponents
+
+
+def has_intensity_dip(region1, region2, image, threshold_ratio=0.7):
+    """
+    Check if there's a noticeable intensity dip between two centroids in an image.
+    Returns True if dip is detected (i.e., they likely belong to separate peaks).
+    """
+    from skimage.draw import line
+    c1 = np.round(region1).astype(int)
+    c2 = np.round(region2).astype(int)
+    rr, cc = line(c1[1], c1[0], c2[1], c2[0])
+    intensities = image[rr, cc]
+    min_i = intensities.min()
+    peak_i = max(image[c1[1], c1[0]], image[c2[1], c2[0]])
+    return min_i < threshold_ratio * peak_i
+
+
+def recluster_with_intensity_check_multi_stack(
+    component_df,
+    coords_cols,
+    session_col,
+    image_dict,
+    tolerance_um=5.0,
+    voxel_size=np.array([1.18, 1.18, 2.0]),
+    threshold_ratio=0.7
+):
+    #TODO fix this mess
+    coords = component_df[coords_cols].values
+    scaled_coords = coords * voxel_size
+    tree = cKDTree(scaled_coords)
+    neighbors = tree.query_ball_tree(tree, r=tolerance_um)
+
+    G = nx.Graph()
+    G.add_nodes_from(component_df.index)
+
+    for i, nlist in enumerate(neighbors):
+        for j in nlist:
+            if i >= j:
+                continue
+
+            row_i = component_df.iloc[i]
+            row_j = component_df.iloc[j]
+
+            sess_i = list(row_i[session_col])[0]
+            sess_j = list(row_j[session_col])[0]
+
+            z_i = int(round(row_i[coords_cols[2]]))
+            z_j = int(round(row_j[coords_cols[2]]))
+
+            if sess_i not in image_dict or sess_j not in image_dict:
+                continue
+            if z_i >= image_dict[sess_i].shape[0] or z_j >= image_dict[sess_j].shape[0]:
+                continue
+
+            img_i = gaussian_filter(image_dict[sess_i][z_i], sigma=1.0)
+
+            c1 = row_i[coords_cols[:2]].values
+            c2 = row_j[coords_cols[:2]].values
+
+            if sess_i == sess_j:
+                # SAME session: only connect if there is NO intensity dip
+                if not has_intensity_dip(c1, c2, img_i, threshold_ratio=threshold_ratio):
+                    G.add_edge(component_df.index[i], component_df.index[j])
+            else:
+                # DIFFERENT session: connect directly (or optionally check dip here too)
+                G.add_edge(component_df.index[i], component_df.index[j])
+
+    subcomponents = []
+    for nodes in nx.connected_components(G):
+        sub_df = component_df.loc[list(nodes)].copy()
+        subcomponents.append(sub_df)
+
+    return subcomponents
+
+
+
+
+def update_persistent_cells_with_reclustering(
+    suspicious_components,
+    coords_cols,
+    session_col,
+    image_dict=None,
+    recluster_method="distance",
+    tolerance_um=4,
+    voxel_size=np.array([1.18, 1.18, 2.0]),
+    threshold_ratio=0.7,
+):
+    """
+    Recluster suspicious components and return new persistent cells.
+    Supports both geometric distance-based and intensity-dip-based reclustering.
+    """
+    all_reclustered = []
+
+    for component_df in suspicious_components:
+        if recluster_method == "distance":
+            subcomponents = recluster_component(
+                component_df,
+                coords_cols=coords_cols,
+                session_col=session_col,
+                tolerance_um=tolerance_um,
+                voxel_size=voxel_size
+            )
+
+        elif recluster_method == "intensity":
+            if image_dict is None:
+                raise ValueError("image_stacks must be provided for intensity-based reclustering.")
+            subcomponents = recluster_with_intensity_check_multi_stack(
+                component_df,
+                coords_cols=coords_cols,
+                session_col=session_col,
+                image_dict=image_dict,
+                tolerance_um=tolerance_um,
+                voxel_size=voxel_size,
+                threshold_ratio=threshold_ratio
+            )
+
+        else:
+            raise ValueError("Unknown recluster_method. Use 'distance' or 'intensity'.")
+
+        for sub_df in subcomponents:
+            mean_coords = sub_df[coords_cols].mean()
+            session_set = set(sub_df['detected_in_sessions'].explode())
+            all_reclustered.append({
+                **{c: mean_coords[c] for c in coords_cols},
+                "detected_in_sessions": session_set,
+                "n_sessions": len(session_set),
+                "close_neighbour" : True,
+            })
+
+    return all_reclustered
+
+
+def pool_cells_globally(mouse, region, session_ids, config, tolerance=6):
+    all_cells = []
+    cell_to_session = []
+
+    sessions = utils.read_single_session_cell_data(
+                                  mouse, region, session_ids, config, test=False, optimized=True)
+
+    # Assign global IDs to all cells
+    global_idx = 0
+    for sess_idx, df in enumerate(sessions):
+        df = df.copy()
+        df = df.loc[df["Interior (px)"]>150].copy()
+        print("df shape ", df.shape[0])
+        df.loc[:,"detected_in_sessions"] =[{session_ids[sess_idx]}] * len(df)
+        df['global_id'] = np.arange(global_idx, global_idx + len(df))
+        global_idx += len(df)
+        all_cells.append(df)
+        cell_to_session.extend([session_ids[sess_idx]] * len(df))
+
+    all_cells_df = pd.concat(all_cells, ignore_index=True)
+    
+    coords = all_cells_df[constants.COORDS_3D_CENTER].values
+    scaled_coords = coords * np.array([1.18, 1.18, 2.0])
+
+    # Build KDTree and find all neighbors within tolerance
+    tree = cKDTree(scaled_coords)
+    neighbors = tree.query_ball_tree(tree, r=tolerance)
+
+    # Build graph: connect only cells from different sessions
+    G = nx.Graph()
+    G.add_nodes_from(all_cells_df['global_id'])
+
+    for i, neighbors_i in enumerate(neighbors):
+        for j in neighbors_i:
+            if i >= j:
+                continue  # avoid duplicates and self-loops
+            if cell_to_session[i] != cell_to_session[j]:
+                G.add_edge(all_cells_df.at[i, 'global_id'], all_cells_df.at[j, 'global_id'])
+
+    # Find connected components = persistent cells
+    persistent_cells = []
+    
+    normal_components = []
+    suspicious_components = []
+    
+    for component in nx.connected_components(G):
+        component_df = all_cells_df[all_cells_df['global_id'].isin(component)].copy()
+        session_counts = component_df['detected_in_sessions'].explode().value_counts()
+        
+        if any(session_counts > 1):
+            suspicious_components.append(component_df)
+            
+            #normal_components.append(component_df)
+        else:
+            normal_components.append(component_df)
+    
+    
+    for component_df in normal_components:
+        #component_df = all_cells_df[all_cells_df['global_id'].isin(component)]
+
+        session_counts = component_df['detected_in_sessions'].explode().value_counts()
+
+        mean_coords = component_df[constants.COORDS_3D_CENTER].mean()
+        session_set = set(component_df['detected_in_sessions'].explode())
+        persistent_cells.append({
+            **{c: mean_coords[c] for c in constants.COORDS_3D_CENTER},
+            "detected_in_sessions": session_set,
+            "n_sessions": len(session_set),
+            "close_neighbour" : False,
+        })
+
+    # Add unmatched cells (not connected to any other)
+    matched_ids = set.union(*[set(c) for c in nx.connected_components(G)])
+    unmatched = all_cells_df[~all_cells_df['global_id'].isin(matched_ids)]
+    for _, row in unmatched.iterrows():
+        persistent_cells.append({
+            **{c: mean_coords[c] for c in constants.COORDS_3D_CENTER},
+            "detected_in_sessions": row["detected_in_sessions"],
+            "n_sessions": len(row["detected_in_sessions"]),
+            "close_neighbour" : False,
+        })
+    print(f'number of sus comps {len(suspicious_components)}')
+    reclustered = update_persistent_cells_with_reclustering(
+        suspicious_components,
+        coords_cols=constants.COORDS_3D_CENTER,
+        session_col="detected_in_sessions",
+        image_dict=None,
+        recluster_method="distance", 
+        tolerance_um=5,
+    )
+    persistent_cells.extend(reclustered)
+
+    return pd.DataFrame(persistent_cells)
+

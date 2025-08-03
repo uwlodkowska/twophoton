@@ -10,6 +10,9 @@ import constants
 from skimage import io
 import numpy as np
 import math
+import os.path
+import cell_preprocessing as cp
+import ast
 
 def read_single_session_cell_data(mouse, region, sessions, config, test=False, optimized=False):
     DIR_PATH = config["experiment"]["dir_path"]
@@ -38,8 +41,21 @@ def read_single_session_cell_data(mouse, region, sessions, config, test=False, o
             return df
         ret += [df]
     return ret
-    
-        
+
+def read_pooled_cells(mouse, region, config):
+    DIR = config["experiment"]["result_path"]
+    fname = config["filenames"]["pooled_cells"].format(mouse, region)
+    df = pd.read_csv(DIR+fname)
+    df["detected_in_sessions"] = df["detected_in_sessions"].apply(lambda x: 
+                                                                  ast.literal_eval(x) if isinstance(x, str) else x)
+    return df
+
+def read_images(mouse, region, session_ids, config):
+    imgs = []
+    for sid in session_ids:
+        imgs.extend([read_image(mouse, region, sid, config)])
+    return imgs
+      
 def read_image(mouse, region, session, config, watershed = False):
     if watershed:
         return io.imread(constants.dir_path + constants.FILENAMES['watershed_img_fn_template']
@@ -102,3 +118,20 @@ def filter_close_matches(df1, df2, coord_cols, tolerance):
 
     return cross_prod.drop(columns=["distance"]), cross_prod["index_1"].values, cross_prod["index_2"].values
     
+def get_optimized_cell_data(mouse, region, session_id,img, config):
+    fname = config['filenames']['cell_data_opt_template']
+    if os.path.isfile(fname):
+        return read_single_session_cell_data(mouse, 
+                                           region, 
+                                           session_id, 
+                                           config, 
+                                           test=False, 
+                                           optimized=True)[0]
+    print("No such file, calculating optimization")
+    df = read_single_session_cell_data(mouse, 
+                                       region, 
+                                       session_id, 
+                                       config, 
+                                       test=False, 
+                                       optimized=False)[0]
+    return cp.optimize_centroids(df, img, suff="", tolerance = 2)

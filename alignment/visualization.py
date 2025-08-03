@@ -14,6 +14,15 @@ def visualize_with_centroids(mouse, region, session):
     
     visualize_with_centroids_custom(cells, pts)
     
+def visualize_df_centroids(mouse, region, session, centroids_df, config):
+    cells = utils.read_image(mouse, region, session, config)
+
+
+    pts = centroids_df[constants.COORDS_3D]
+    
+    
+    visualize_with_centroids_custom(cells, pts)
+    
 def visualize_with_centroids_custom(img, pts, point_props = None):
         if len(img.shape) > 3:
             channel_axis = 0

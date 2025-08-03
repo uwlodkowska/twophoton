@@ -12,7 +12,6 @@ from constants import ICY_COLNAMES
 import constants
 from concurrent.futures import ProcessPoolExecutor
 from scipy.spatial import cKDTree
-from concurrent.futures import ThreadPoolExecutor
 
 def calculate_disk(coords, radius, disk_no, img):
     center_z = coords[ICY_COLNAMES['zcol']]+disk_no
@@ -172,6 +171,9 @@ def find_active_cells(df, bgr, k_std):
 def optimize_centroid_position(args):
     """Optimize the position of a single centroid using vectorized operations."""
     row, img, suff, tolerance = args
+    if "close_neighbour" in row.index and row["close_neighbour"]:
+        tolerance = tolerance//2
+    
     x_center = int(np.round(row[ICY_COLNAMES['xcol']]))
     y_center = int(np.round(row[ICY_COLNAMES['ycol']]))
     z_center = int(np.round(row[ICY_COLNAMES['zcol']]))
@@ -208,7 +210,13 @@ def optimize_centroid_position(args):
 
     return (*best_coords, brightness_values[best_idx])
 
-def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE):
+def update_df_coords(df, suff):
+    shift_arr = ["shift_z", 'shift_y', 'shift_x']
+    for i, cname in enumerate(constants.COORDS_3D):
+        df[cname] = df[cname] + df[shift_arr[i]+suff]
+    return df
+
+def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE, update_coords=True):
     """Optimize the positions of centroids using parallel processing."""
     integral_img = calculate_integral_image(img)
 
@@ -219,6 +227,9 @@ def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE):
 
     # Convert results back to DataFrame
     df[[f'shift_x{suff}', f'shift_y{suff}', f'shift_z{suff}', f'int_optimized{suff}']] = results
+
+    if update_coords:
+        df = update_df_coords(df, suff)
 
     return df
 
