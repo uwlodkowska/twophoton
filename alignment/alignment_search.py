@@ -17,10 +17,11 @@ with open(config_file, "r") as file:
 DIR_PATH = config["experiment"]["dir_path"]
 RESULT_PATH = DIR_PATH + config["experiment"]["res_dir_path"]
 ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
-
+#TODO remove
+RESULT_PATH_SCA = "/mnt/data/fos_gfp_tmaze/multisession/despeckle/" + config["experiment"]["res_dir_path"]
 
 regions = config["experiment"]["regions"][0]
-group_session_order = config["experiment"]["session_order"][0][:4]
+group_session_order = config["experiment"]["session_order"][0]
 
 alignment_filenames = config["alignment_filenames"]
 
@@ -28,6 +29,8 @@ alignment_filenames = config["alignment_filenames"]
 def calculate_cropped_diff(substack1, substack2, x, y):
     xdif = min(substack1.shape[1], substack2.shape[1])-abs(x);
     ydif = min(substack1.shape[2], substack2.shape[2])-abs(y);
+    
+
     sub1_tmp = substack1[:,max(0,x):max(0,x)+xdif,max(0,y):max(0,y)+ydif]
     sub2_tmp = substack2[:,max(0,-x):max(0,-x)+xdif,max(0,-y):max(0,-y)+ydif]
     dif_tmp = abs(sub1_tmp - sub2_tmp)
@@ -36,8 +39,9 @@ def calculate_cropped_diff(substack1, substack2, x, y):
 def find_optimal_crop(substack1, substack2):
     expansions = 0
     step = 10
-    start_range = 25
+    start_range = 20
     x_start, y_start, x_end, y_end = -start_range, -start_range, start_range, start_range
+
     
     while True:
         xrange = range(x_start, x_end)
@@ -82,8 +86,9 @@ def find_optimal_crop(substack1, substack2):
             y_end += step
 
         expansions += 1
+        break
         
-    print(f"range after expansions x {x_start}, {x_end}, y {y_start}, {y_end}")
+    #print(f"range after expansions x {x_start}, {x_end}, y {y_start}, {y_end}")
 
     
     return np.array([[minx],[miny]]), minv
@@ -95,28 +100,30 @@ def find_crop_coords(stack1, stack2):
     start_idx = 0
     
     while start_idx + constants.ALIGNMENT_SUBSTACK_SIZE < stack_size:
+
+        
         stop_idx = start_idx + constants.ALIGNMENT_SUBSTACK_SIZE
         if stop_idx + constants.ALIGNMENT_SUBSTACK_SIZE > stack_size:
             stop_idx = stack_size+1
-        
         coords, sub_avg = find_optimal_crop(stack1[start_idx:stop_idx], 
-                                            stack2[start_idx:stop_idx])
+                                                stack2[start_idx:stop_idx])
         sum_of_avgs += sub_avg
         translations = np.append(translations, coords, axis = 1)
         start_idx = stop_idx
     return translations, sum_of_avgs
 
 def find_dims_post_alignment(orig_dim1, orig_dim2, translation_arr):
-    max_trans = int(max(translation_arr, key = abs))
-    if (np.sign(min(translation_arr)) * np.sign(max(translation_arr)) == -1):
-        return max_trans, int(min(orig_dim1, orig_dim2) 
-                              - (max(translation_arr) - min(translation_arr)))
-    return max_trans, min(orig_dim1, orig_dim2) - abs(max_trans)
+    
 
-def calc_adj_translation(max_tr, curr_trans, direction):
+    max_trans_with_lims = int(max(max(translation_arr),0) - min(min(translation_arr),0))
+
+    
+    return min(orig_dim1, orig_dim2) - max_trans_with_lims
+
+def calc_adj_translation(maxval, curr_trans):
     #direction - jesli sesja subsequent to -1
-    #do sprawdzenia nawiasy cuda wianki
-    return int(max(0, (max(0, max_tr * direction) + max_tr-curr_trans)))
+
+    return int(maxval-curr_trans)
 
 def truncate_along_z(stack1, stack2, prev_stacks, minz):
     print("minz ", minz, "stack shape ", stack1.shape)
@@ -137,13 +144,13 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
     print("start image id ", start_img_id)
 
 
-    max_transx, difx = find_dims_post_alignment(z_truncated[0].shape[1], 
+    difx = find_dims_post_alignment(z_truncated[0].shape[1], 
                                                 z_truncated[1].shape[1], 
                                                 optimal_translations[0])
-    max_transy, dify = find_dims_post_alignment(z_truncated[0].shape[2], 
+    dify = find_dims_post_alignment(z_truncated[0].shape[2], 
                                                 z_truncated[1].shape[2], 
                                                 optimal_translations[1])
-
+    
     ret1 = np.empty((z_truncated[0].shape[0], difx, dify))
     ret2 = np.empty_like(ret1)
 
@@ -154,21 +161,24 @@ def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_st
         for prev_stack in prev_stacks:
             prev_ret += [np.empty_like(ret1)]
 
-        
-    x0 = [calc_adj_translation(max_transx,x, -1) for x in optimal_translations[0]]
-    y0 = [calc_adj_translation(max_transy,y, -1) for y in optimal_translations[1]]
-    
-    x0_b = max(0, max_transx)
-    y0_b = max(0, max_transy)
-    
+    maxx = int(max(0, max(optimal_translations[0])))
+    maxy = int(max(0, max(optimal_translations[1])))
+   
+    x0 = [calc_adj_translation(maxx, x) for x in optimal_translations[0]]
+    y0 = [calc_adj_translation(maxy, y) for y in optimal_translations[1]]
+
+
+    print("cropped diff ", difx, dify)
+
     for idx, (r1, r2) in enumerate(zip(z_truncated[0],z_truncated[1])):
         tr_idx = idx//constants.ALIGNMENT_SUBSTACK_SIZE
         if tr_idx >= len(x0):
             tr_idx = len(x0) - 1
-        ret1[idx] =  r1[x0_b:x0_b+difx,y0_b:y0_b+dify]
+
+        ret1[idx] =  r1[maxx:maxx+difx,maxy:maxy+dify]
         if prev_stacks is not None:
             for i in range(len(prev_stacks)):
-                prev_ret[i][idx] = prev_stacks[i][idx][x0_b:x0_b+difx,y0_b:y0_b+dify]
+                prev_ret[i][idx] = prev_stacks[i][idx][maxx:maxx+difx,maxy:maxy+dify]
         ret2[idx] =  r2[x0[tr_idx]:x0[tr_idx]+difx,y0[tr_idx]:y0[tr_idx]+dify]
 
     return ret1, ret2, prev_ret
@@ -226,17 +236,17 @@ def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, re
     ret1 = prepare_for_tif_save(ret1)
     ret2 = prepare_for_tif_save(ret2)
     findif = abs(ret1-ret2)
-    
+    axes = 'ZCYX'
     sn = session_order[start_img_id-1:start_img_id+1]
 
     tifffile.imwrite(res_dir+fname_template.format(mouse, region,sn[0])
                      + constants.IMG_EXT,ret1,imagej=True, 
-                     metadata={'unit': 'pixels','axes': 'ZCYX'})
+                     metadata={'unit': 'pixels','axes': axes})
     tifffile.imwrite(res_dir+fname_template.format(mouse, region,sn[1])
                      + constants.IMG_EXT, ret2,imagej=True, 
-                     metadata={'unit': 'pixels','axes': 'ZCYX'})
+                     metadata={'unit': 'pixels','axes': axes})
     tifffile.imwrite(res_dir+"m"+str(mouse)+"r"+str(region)+"_"+file_suffix
-                     + constants.IMG_EXT,findif,imagej=True, metadata={'unit': 'pixels','axes': 'ZCYX'})
+                     + constants.IMG_EXT,findif,imagej=True, metadata={'unit': 'pixels','axes': axes})
 
     if to_csv:
         with open(res_dir+"m"+str(mouse)+"r"+str(region)+"_"+str(start_img_id)+file_suffix+ '.csv', 'w', newline='') as csvfile:
@@ -247,9 +257,10 @@ def save_results(ret1, ret2, optimal_translations, minz, start_img_id, mouse, re
             
 #%%
 def save_single_img(img_path, image):
+    axes = 'ZCYX'
     if image is not None:
         image = prepare_for_tif_save(image)
-        tifffile.imwrite(img_path, image, imagej=True, metadata={'unit': 'pixels','axes': 'ZCYX'})
+        tifffile.imwrite(img_path, image, imagej=True, metadata={'unit': 'pixels','axes': axes})
 
 #%%
 
@@ -275,6 +286,8 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
     optimal_sum_of_avgs = 50000
     optimal_translations = []
     minz = 0
+    # for z in range(0, 1):
+    # TODO
     for z in range(-constants.STACK_WINDOW, constants.STACK_WINDOW):
         tst1 = orig[0][max(0,z) : min(z1, z2+z)];
         tst2 = orig[1][max(0,-z) : min(z1-z, z2)];
@@ -292,6 +305,12 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
             optimal_sum_of_avgs = sum_of_avgs
             optimal_translations = coords_list
             minz = z
+            
+    # optimal_translations = [[-6]*10+[4]*5,
+    #                         [0]*15]
+    # minz=0
+    
+            
     print(f"Optimal translations list {optimal_translations}")
     aligned1, aligned2, aligned_prev = align_stacks(orig[0], orig[1], optimal_translations, 
                                                minz, start_session_id, prev_stacks = prev_imgs)
@@ -323,13 +342,12 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
 
 def align_all_sessions(m,r, session_order, partial=None):
     #print(m, r, session_order)
-    for start_img_id in range(1, len(session_order)):
+    for start_img_id in range(1,len(session_order)):
         print("starting ", start_img_id, session_order)
         suff = "_" + str(session_order[start_img_id-1]) + "_" + str(session_order[start_img_id])
         align_sessions(m, r, start_img_id, suff, session_order, partial)
         print("-------------------------------------")
         
 #%%
-align_all_sessions(13,1,group_session_order, partial=None)
-#%%
-
+for m,r in [[6,1]]:#, [6,1]]:
+    align_all_sessions(m,r,group_session_order, partial=None)
