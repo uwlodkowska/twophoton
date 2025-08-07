@@ -10,8 +10,10 @@ import constants, intersession
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import upsetplot
 
 import cell_classification as cc
+import utils
 
 def plot_intensity_change_histogram(d1, label1, d2, label2, title):
     plt.title(title)
@@ -57,24 +59,47 @@ def plot_feature_averaged_for_mouse(regions, session_order, feature_func, plt_ti
     print(np.mean(all_mice, axis=0))
     plt.show()
     
-def session_detection_vs_background(df, session_ids):
+def session_detection_vs_background(df, session_ids, show_hist=False, sub_bgr=False):
     for sid in session_ids:
+        df[f"intensity_{sid}"] = df[f"int_optimized_{sid}"]
+        if sub_bgr:
+            df[f"intensity_{sid}"] -= df[f"background_{sid}"]
         detected_in_session = df["detected_in_sessions"].apply(lambda s: sid in s)
         detected = df[detected_in_session]
         not_detected = df[~detected_in_session]
     
         
-        print(f"session {sid}")
-        print("detected: ", detected[f"int_optimized_{sid}"].describe())
-        print("not detected: ", not_detected[f"int_optimized_{sid}"].describe())
-        plt.hist(detected[f"int_optimized_{sid}"], bins=50, alpha=0.6,range=(0, max(df[f"int_optimized_{sid}"])), label=f"Detected in {sid}")
-        plt.hist(not_detected[f"int_optimized_{sid}"], bins=50, alpha=0.6,range=(0, max(df[f"int_optimized_{sid}"])), label=f"Not detected in {sid}")
-        plt.legend()
+        if show_hist:
+            plt.hist(detected[f"int_optimized_{sid}"], bins=50, alpha=0.6,range=(0, max(df[f"int_optimized_{sid}"])), label=f"Detected in {sid}")
+            plt.hist(not_detected[f"int_optimized_{sid}"], bins=50, alpha=0.6,range=(0, max(df[f"int_optimized_{sid}"])), label=f"Not detected in {sid}")
+            plt.legend()
+            plt.show()
+        
+        sns.scatterplot(data=detected, x="Center Z (px)", y=f"intensity_{sid}", s=10)
+        sns.scatterplot(data=not_detected, x="Center Z (px)", y=f"intensity_{sid}", s=10)
         plt.show()
         
-        sns.scatterplot(data=detected, x="Center Z (px)", y=f"int_optimized_{sid}")
-        sns.scatterplot(data=not_detected, x="Center Z (px)", y=f"int_optimized_{sid}")
+        
+        
+def show_lmplots_comparison(df, session_ids):
+    long_df = make_longform_df(df, session_ids)
+    for sid in session_ids:
+        df_sid = long_df[long_df["session"] == sid]
+    
+        g = sns.lmplot(
+            data=df_sid,
+            x="z",
+            y="intensity",
+            hue="subtracted",
+            lowess=True,
+            aspect=1.5,
+            height=4,
+            scatter_kws={"s": 10, "alpha": 0.4}
+        )
+        g.set(title=f"Session {sid}: Intensity vs Z (before/after subtraction)", xlabel="Center Z (px)", ylabel="Intensity")
+        plt.tight_layout()
         plt.show()
+    
 
 def avg_row_detections(row, all_sessions):
     detected = []
@@ -104,7 +129,7 @@ def cell_detection_vs_background(df, session_ids):
     
 def plot_tendency_groups(df, pairs):
     
-    groups = ["up", "down", "stable"]
+    groups = ["on", "off","const"]
     labels = [f'{a}→{b}' for a, b in pairs]
 
     for g in groups:
@@ -112,8 +137,8 @@ def plot_tendency_groups(df, pairs):
     plt.legend()
     plt.show()
     
-def plot_cohort_tendencies(regions, id_pairs, config):
-    df_plot = cc.gather_group_percentages_across_mice(regions, id_pairs, config)
+def plot_cohort_tendencies(regions, id_pairs, config, groups=["on", "off", "const"]):
+    df_plot = cc.gather_group_percentages_across_mice(regions, id_pairs, config, groups)
 
     df_plot["transition"] = df_plot["session_from"] + "_to_" + df_plot["session_to"]
     
@@ -137,8 +162,8 @@ def plot_class_distribution(
     regions,
     config,
     classes,
-    class_column="class_label",
-    count_column="count",
+    class_column="spec_class",
+    count_column="percentage",
     normalize=True,
     title="Cell Class Distribution per Mouse"
 ):
@@ -187,4 +212,70 @@ def plot_class_distribution(
     plt.tight_layout()
     plt.show()
     
+def convert_to_upsetplot_fmt(regions, config, sessions):
+    for mouse,region in regions:
+        df = utils.read_pooled_cells(mouse, region, config)
+        df['detected_in_sessions'] = df['detected_in_sessions'].apply(frozenset)
+        for session in sessions:
+            df[session] = df['detected_in_sessions'].apply(lambda x: session in x).astype(bool)
+        return df.groupby(sessions).size()
         
+def plot_upsetplot(regions, config, sessions):
+    df = convert_to_upsetplot_fmt(regions, config, sessions)
+
+    print(df)
+    upsetplot.plot(df) 
+    plt.show() 
+    
+def make_longform_df(df, session_ids, suffix="int_optimized", background_suffix="background"):
+    records = []
+    
+    for sid in session_ids:
+        raw_col = f"{suffix}_{sid}"
+        bgr_col = f"{background_suffix}_{sid}"
+        zcol = constants.ICY_COLNAMES["zcol"]
+
+        detected_in_session = df["detected_in_sessions"].apply(lambda s: sid in s)
+        detected = df[detected_in_session]
+
+        for _, row in detected.iterrows():
+            records.append({
+                "session": sid,
+                "intensity": row[raw_col],
+                "subtracted": False,
+                "z": row[zcol]
+            })
+
+        if bgr_col in detected.columns:
+            for _, row in detected.iterrows():
+                records.append({
+                    "session": sid,
+                    "intensity": row[raw_col] - row[bgr_col],
+                    "subtracted": True,
+                    "z": row[zcol]
+                })
+
+    return pd.DataFrame(records)
+
+
+def compare_session_intensities(df, session_ids, suffix="int_optimized", background_suffix="background", figsize=(10, 5)):
+    """
+    Plot per-session intensity distributions before and after background subtraction.
+
+    Parameters:
+    - df: DataFrame with intensity and background columns
+    - session_ids: list of session IDs
+    - suffix: suffix used for raw intensity columns (default: 'int_optimized')
+    - background_suffix: suffix used for background columns (default: 'background')
+    - figsize: tuple specifying figure size
+    """
+    long_df = make_longform_df(df, session_ids, suffix=suffix, background_suffix=background_suffix)
+
+    plt.figure(figsize=figsize)
+    sns.violinplot(data=long_df, x="session", y="intensity", hue="subtracted", split=True)
+    plt.title("Intensity Distributions Before and After Background Subtraction")
+    plt.xlabel("Session")
+    plt.ylabel("Intensity")
+    plt.legend(title="Subtracted", labels=["No", "Yes"])
+    plt.tight_layout()
+    plt.show()

@@ -42,12 +42,26 @@ def read_single_session_cell_data(mouse, region, sessions, config, test=False, o
         ret += [df]
     return ret
 
+
 def read_pooled_cells(mouse, region, config):
     DIR = config["experiment"]["result_path"]
     fname = config["filenames"]["pooled_cells"].format(mouse, region)
     df = pd.read_csv(DIR+fname)
     df["detected_in_sessions"] = df["detected_in_sessions"].apply(lambda x: 
                                                                   ast.literal_eval(x) if isinstance(x, str) else x)
+
+    return df
+
+def read_pooled_with_background(mouse, region, config):
+    sessions = config["experiment"]["session_order"][0]
+    df = read_pooled_cells(mouse, region, config)
+    
+    img = read_image(mouse, region, sessions[0], config)
+    
+    df = cp.filter_border_cells(df, sessions, img.shape)
+    for sid in sessions:
+        img = read_image(mouse, region, sid, config)
+        df = cp.find_background(df, img, suff=f"_{sid}")
     return df
 
 def read_images(mouse, region, session_ids, config):

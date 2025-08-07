@@ -9,6 +9,8 @@ import cell_preprocessing as cp
 import utils
 import plotting
 
+
+
 #%% config
 
 config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
@@ -32,7 +34,7 @@ pooled_cells_fname = config["filenames"]["pooled_cells"]
 
 #%% ready regions
 
-regions = [[1,1], [14,1], [9,2], [13,1]]
+regions = [[16,2], [8,1]]
 
 #%% reading  and prepping detection results from icy
 
@@ -61,7 +63,7 @@ for mouse, region in regions:
 #%% pooling
         
 #!warning! here tolerance is not in pixels, but um
-for mouse, region in regions[1:]:        
+for mouse, region in regions[:1]:        
     df_reseg = its.pool_cells_globally(mouse, region, group_session_order, config, 7)
     for sid in group_session_order:
         img = utils.read_image(mouse, region, sid, config)
@@ -69,19 +71,40 @@ for mouse, region in regions[1:]:
     df_reseg.to_csv(RESULT_PATH+pooled_cells_fname.format(mouse, region))
    
 #%%
-plotting.session_detection_vs_background(df_reseg, group_session_order)
+df = utils.read_pooled_with_background(1, 1, config)
+plotting.session_detection_vs_background(df, group_session_order, sub_bgr = True)
 
 
 #%%
-df = df_reseg.copy()
-plotting.cell_detection_vs_background(df, group_session_order)
+df = utils.read_pooled_with_background(1, 1, config)
+plotting.cell_detection_vs_background(df, group_session_order, sub_bgr=True)
 
 #%%
-regions = [[1,1], [14,1], [9,2]]
+regions = [[1,1], [14,1], [9,2],[8,1], [16,2]]
 #%%
 pairs = list(zip(group_session_order, group_session_order[1:]))
-plotting.plot_cohort_tendencies(regions, pairs, config)
+plotting.plot_cohort_tendencies(regions, pairs, config, groups=["on", "off", "const"])
 
 #%%
-classes = ["landmark_specific", "ctx_specific", "is_mixed"]
-plotting.plot_class_distribution(regions)
+classes = ["landmark_specific", "ctx_specific", "is_mixed", "test_specific"]
+plotting.plot_class_distribution(regions, config, classes)
+#%%
+#%%
+classes = ["is_transient", "is_intermediate", "is_persistent"]
+plotting.plot_class_distribution(regions, config, classes)
+#%%
+for m, r in regions:
+    df = utils.read_pooled_with_background(m,r, config)
+    plotting.compare_session_intensities(df, group_session_order)
+    #plotting.show_lmplots_comparison(df, group_session_order)
+#%%
+plotting.plot_upsetplot(regions, config, group_session_order[1:])
+#%%
+df = df_reseg.copy()
+img = utils.read_image(16, 2, "s0", config)
+df = cp.find_background(df, img, suff="_s0")
+
+#%%
+tst = utils.read_pooled_with_background(1, 1, config)
+#%%
+tst2 = utils.read_pooled_cells(1, 1, config)

@@ -15,9 +15,12 @@ path_for_icy = res_dir_path + "aligned_despeckle/"
 
 ROI_DIAMETER = [8,6,4]
 ICY_COLNAMES = {'mean_intensity' : 'Mean Intensity (ch 0)',
-                'xcol' : 'Intensity center X (px) (ch 0)',
-                'ycol' : 'Intensity center Y (px) (ch 0)',
-                'zcol' : 'Intensity center Z (px) (ch 0)'}
+                'xcol' : 'Center X (px)',
+                'ycol' : 'Center Y (px)',
+                'zcol' : 'Center Z (px)'}
+                # 'xcol' : 'Intensity center X (px) (ch 0)',
+                # 'ycol' : 'Intensity center Y (px) (ch 0)',
+                # 'zcol' : 'Intensity center Z (px) (ch 0)'}
 XY_SCALE = 1.19
 Z_SCALE = 2
 
@@ -25,6 +28,7 @@ ALIGNMENT_SUBSTACK_SIZE = 5
 ALIGNMENT_SEARCH_WINDOW = 55
 
 COORDS_3D = [ICY_COLNAMES['zcol'], ICY_COLNAMES['ycol'], ICY_COLNAMES['xcol']]
+COORDS_3D_CENTER = ['Center Z (px)', 'Center Y (px)', 'Center X (px)',]
 
 SCALE = [Z_SCALE, XY_SCALE, XY_SCALE]
 
@@ -72,4 +76,4 @@ ALIGNMENT_FNAMES = {'thresh' : "m{0}s{2}_r{1}_spots",
 'raw' : "m{0}s{2}_r{1}"}
 
 
-STACK_WINDOW = 11
+STACK_WINDOW = 7

@@ -8,10 +8,12 @@ from skimage.draw import disk
 import numpy as np
 import pandas as pd
 from skimage import io
-from constants import ICY_COLNAMES
-import constants
 from concurrent.futures import ProcessPoolExecutor
 from scipy.spatial import cKDTree
+
+import utils
+from constants import ICY_COLNAMES
+import constants
 
 def calculate_disk(coords, radius, disk_no, img):
     center_z = coords[ICY_COLNAMES['zcol']]+disk_no
@@ -45,22 +47,6 @@ def calculate_circ_slice(x,y,rad, img_s):
     brightness = int(img_s[ymax][xmax])+int(img_s[ymin][xmin])-int(img_s[ymin][xmax])-int(img_s[ymax][xmin])
     area =  (xmax-xmin)*(ymax-ymin)
     return brightness, area
-
-# def calculate_intensity(x,y,z, img):
-#     sum_int = 0
-#     area_int = 0
-#     for i in range(-2,3): #going through 5 flat slices making up the 3d cell
-#         diameter = constants.ROI_DIAMETER[abs(i)]
-#         rad = diameter//2
-#         if (z+i <0 or z+i>=img.shape[0]):
-#             continue
-#         img_s = img[z+i]
-#         res = calculate_circ_slice(x,y,rad,img_s) 
-#         sum_int += res[0]
-#         area_int += res[1]
-#     if area_int == 0:
-#         return 0
-#     return sum_int/area_int
 
 def calculate_intensity(x, y, z, img):
     sum_int = 0
@@ -139,34 +125,6 @@ def find_active_cells(df, bgr, k_std):
         df[f'active{i}'] = df[f"int_optimized{i}"] > threshold
     return df
 
-# def optimize_centroid_position(args):
-#     """Optimize the position of a single centroid."""
-#     row, img, suff, tolerance = args
-#     x_center = int(np.round(row[ICY_COLNAMES['xcol']]))
-#     y_center = int(np.round(row[ICY_COLNAMES['ycol']]))
-#     z_center = int(np.round(row[ICY_COLNAMES['zcol']]))
-    
-#     current_max = -np.inf
-#     best_coords = (0, 0, 0)
-
-#     for x in range(-tolerance, tolerance + 1):
-#         for y in range(-tolerance, tolerance + 1):
-#             for z in range(-1, 2):
-#                 new_x = x_center + x
-#                 new_y = y_center + y
-#                 new_z = z_center + z
-                
-#                 # Check bounds
-#                 if not (0 <= new_x < img.shape[2] and 0 <= new_y < img.shape[1] and 0 <= new_z < img.shape[0]):
-#                     continue
-                
-#                 mean_calculated = calculate_intensity(new_x, new_y, new_z, img)  
-#                 if mean_calculated > current_max:
-#                     current_max = mean_calculated
-#                     best_coords = (x, y, z)
-
-#     return (best_coords[0], best_coords[1], best_coords[2], current_max)
-
 
 def optimize_centroid_position(args):
     """Optimize the position of a single centroid using vectorized operations."""
@@ -233,6 +191,49 @@ def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE, update_c
 
     return df
 
+
+def filter_border_cells(df, sessions, img_shape, nucl_size_half = 3):
+    z, y, x = img_shape
+    for sid in sessions:       
+        df = df[
+            ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) > nucl_size_half) &
+            ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) < x - nucl_size_half) &
+            ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) > nucl_size_half) &
+            ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) < y - nucl_size_half) &
+            ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) > 2) &
+            ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) < z - 2)
+            ]
+    return df
+
+def calculate_background_for_cell(row, img, distance, suff):
+    distances = [distance, distance, distance//2]
+
+    shifts = [distances[i] * np.eye(3, dtype=int)[i] for i in range(3)] +\
+        [-distances[i] * np.eye(3, dtype=int)[i] for i in range(3)] 
+        
+    base_coords = [int(row[ICY_COLNAMES[f'{x}col']] + row[f'shift_{x}{suff}']) for x in ['x', 'y', 'z']]
+    
+    shift_variants = [base_coords + shift for shift in shifts]
+    
+    zmax, ymax, xmax = img.shape
+
+    bounds = [xmax, ymax, zmax]
+    valid_variants = [ coords for coords in shift_variants if all(0 <= c < bounds[i] for i, c in enumerate(coords))]
+
+    brightness_values = np.array([calculate_intensity(x, y, z, img) for x, y, z in valid_variants])
+    return min(brightness_values)
+
+def find_background(df, img, suff="", distance = 10):
+    """Optimize the positions of centroids using parallel processing."""
+    integral_img = calculate_integral_image(img)
+
+    df[f"background{suff}"] = df.apply(calculate_background_for_cell,img = integral_img, 
+                                                       distance = distance,
+                                                       suff = suff,
+                                                       axis = 1)   
+
+
+    return df
 
 
 

@@ -24,14 +24,14 @@ def appeared_in_sessions(row_sessions, sessions_to_check):
 def get_cell_status(row, id_pair):
     if id_pair[0] in row["detected_in_sessions"]:
         if id_pair[1] in row["detected_in_sessions"]:
-            return "stable"
+            return "const"
         else:
-            return "down"
+            return "off"
     elif id_pair[1] in row["detected_in_sessions"]:
-        return "up"
+        return "on"
     return "_"
     
-def up_down_cells(df, id_pairs):
+def on_off_cells(df, id_pairs):
     for id_pair in id_pairs:
         df[f"{id_pair[0]}_to_{id_pair[1]}"] = df.apply(get_cell_status, 
                                                        id_pair = id_pair, 
@@ -68,12 +68,12 @@ def count_cells_per_tendency_group(df, id_pairs, group, normalize=True):
     print(group, group_occurences_per_pair)
     return group_occurences_per_pair
 
-def gather_group_percentages_across_mice(regions, id_pairs, config, groups=("up", "down", "stable"), normalize=True):
+def gather_group_percentages_across_mice(regions, id_pairs, config, groups=["on", "off", "const"], normalize=True):
     data = []
     for mouse, region in regions:
-        df = utils.read_pooled_cells(mouse, region, config)
+        df = utils.read_pooled_with_background(mouse, region, config)
         for group in groups:
-            df = up_down_cells(df, id_pairs)
+            df = on_off_cells(df, id_pairs)
             percentages = count_cells_per_tendency_group(df, 
                                                          id_pairs, 
                                                          group=group, 
@@ -89,16 +89,17 @@ def gather_group_percentages_across_mice(regions, id_pairs, config, groups=("up"
     return pd.DataFrame(data)
 
 def mark_cells_specificity_class(df):
-    df["test_specific"] = df["detected_in_sessions"].apply(is_test_specific, axis=1)
+    df["test_specific"] = df["detected_in_sessions"].apply(is_test_specific)
     df["ctx_specific"] = df["detected_in_sessions"].apply(is_specific_to_type,
                                                           target_group = ctx_sessions,
-                                                          opposing_group = landmark_sessions,
-                                                          axis=1)
+                                                          opposing_group = landmark_sessions)
     df["landmark_specific"] = df["detected_in_sessions"].apply(is_specific_to_type,
                                                                target_group = landmark_sessions,
-                                                               opposing_group = ctx_sessions,
-                                                               axis=1)
-    df["is_mixed"] = df["detected_in_sessions"].apply(is_mixed, axis=1)
+                                                               opposing_group = ctx_sessions)
+    df["is_mixed"] = df["detected_in_sessions"].apply(is_mixed)
+    df["is_transient"] = df["n_sessions"] == 1
+    df["is_intermediate"] = (df["n_sessions"] < 4) & ~df["is_transient"]
+    df["is_persistent"] = df["n_sessions"] >3
     return df
 
 def count_cells_in_spec_class(df, cl, normalize=True):
@@ -112,13 +113,16 @@ def count_cells_in_spec_class(df, cl, normalize=True):
 def gather_cells_specificity_percentages_across_mice(regions, config, classes, normalize=True):
     data = []
     for mouse, region in regions:
-        df = utils.read_pooled_cells(mouse, region, config)
+        df = utils.read_pooled_with_background(mouse, region, config)
         df = mark_cells_specificity_class(df)
         for cl in classes:
             percentage = count_cells_in_spec_class(df, cl, normalize)
+            print(mouse, cl, percentage)
             data.append({
                 "mouse_id": f"m{mouse}r{region}",
                 "spec_class": cl,
                 "percentage": percentage
             })
     return pd.DataFrame(data)
+
+
