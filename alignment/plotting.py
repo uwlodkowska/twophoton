@@ -115,6 +115,22 @@ def avg_row_detections(row, all_sessions):
     return row
         
 def cell_detection_vs_background(df, session_ids):
+    '''
+    plots intensity of each cell shaped roi at specified coordinates in df in sessions 
+    it has been identified in and not
+
+    Parameters
+    ----------
+    df : TYPE
+        DESCRIPTION.
+    session_ids : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    '''
     df["cell_avg_detected"] = 0.0
     df["cell_avg_undetected"] = 0.0
     df = df.apply(avg_row_detections, all_sessions = session_ids, axis=1)
@@ -137,8 +153,79 @@ def plot_tendency_groups(df, pairs):
     plt.legend()
     plt.show()
     
-def plot_cohort_tendencies(regions, id_pairs, config, groups=["on", "off", "const"]):
-    df_plot = cc.gather_group_percentages_across_mice(regions, id_pairs, config, groups)
+    
+def generic_class_plot(df, xcol, ycol, title, hue="Mouse"):
+    ylabel = "Fraction of cells"
+
+    plt.figure(figsize=(8, 5))
+    sns.barplot(
+        data=df,
+        x=xcol,
+        y=ycol,
+        hue=hue,
+        palette="Set2"
+    )
+
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xlabel("Session")
+    plt.xticks(rotation=45)
+    plt.legend(title=hue, bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.show()
+    
+    agg_df = (
+    df.groupby(xcol)[ycol]
+    .agg(["mean", "sem"])  # SEM = standard error of the mean
+    .reset_index()
+    )
+    
+    plt.figure(figsize=(8, 5))
+    
+    sns.barplot(
+    data=agg_df,
+    x=xcol,
+    y="mean",
+    palette="Set2",
+    errorbar=None,
+    zorder=1  # plot underneath points
+    )
+    
+    # Add SEM as manual error bars
+    plt.errorbar(
+        x=range(len(agg_df)),
+        y=agg_df["mean"],
+        yerr=agg_df["sem"],
+        fmt='none',
+        ecolor='black',
+        capsize=5,
+        zorder=2
+    )
+    
+    # Add raw data points as stripplot
+    sns.stripplot(
+        data=df,
+        x=xcol,
+        y=ycol,
+        color='black',
+        jitter=True,
+        alpha=0.6,
+        dodge=False,
+        size=4,
+        zorder=3
+    )
+    
+    plt.title("Mean Fraction of Transient Cells per Session")
+    plt.ylabel("Fraction of cells (mean ± SEM)")
+    plt.xlabel("Session")
+    plt.xticks(ticks=range(len(agg_df)), labels=agg_df[xcol], rotation=75)
+    plt.tight_layout()
+    plt.show()
+
+        
+
+def plot_cohort_tendencies(regions, id_pairs, config, groups=["on", "off", "const"],ttype="presence", dfs=None):
+    df_plot = cc.gather_group_percentages_across_mice(regions, id_pairs, config, groups, dfs=dfs, ttype=ttype)
 
     df_plot["transition"] = df_plot["session_from"] + "_to_" + df_plot["session_to"]
     
@@ -162,10 +249,12 @@ def plot_class_distribution(
     regions,
     config,
     classes,
+    filterby = None,
     class_column="spec_class",
     count_column="percentage",
     normalize=True,
-    title="Cell Class Distribution per Mouse"
+    title="Cell Class Distribution per Mouse",
+    dfs = None
 ):
     """
     Create a bar plot comparing cell class distributions across mice.
@@ -182,14 +271,16 @@ def plot_class_distribution(
         Column name containing raw counts.
     normalize : bool
         Whether to normalize counts per mouse to fractions.
-    title : str
-        Title for the plot.
+    filterby : str
+        Classes to filter df by before caculating percentage
     """
 
     df = cc.gather_cells_specificity_percentages_across_mice(regions, 
                                                           config, 
                                                           classes, 
-                                                          True)
+                                                          True,
+                                                          filterby=filterby,
+                                                          dfs=dfs)
 
     
     yval = count_column
@@ -237,7 +328,7 @@ def make_longform_df(df, session_ids, suffix="int_optimized", background_suffix=
 
         detected_in_session = df["detected_in_sessions"].apply(lambda s: sid in s)
         detected = df[detected_in_session]
-
+        detected = df.copy()
         for _, row in detected.iterrows():
             records.append({
                 "session": sid,
@@ -258,7 +349,7 @@ def make_longform_df(df, session_ids, suffix="int_optimized", background_suffix=
     return pd.DataFrame(records)
 
 
-def compare_session_intensities(df, session_ids, suffix="int_optimized", background_suffix="background", figsize=(10, 5)):
+def compare_session_intensities(df, session_ids, mouse, suffix="int_optimized", background_suffix="background", figsize=(10, 5)):
     """
     Plot per-session intensity distributions before and after background subtraction.
 
@@ -273,9 +364,33 @@ def compare_session_intensities(df, session_ids, suffix="int_optimized", backgro
 
     plt.figure(figsize=figsize)
     sns.violinplot(data=long_df, x="session", y="intensity", hue="subtracted", split=True)
-    plt.title("Intensity Distributions Before and After Background Subtraction")
+    plt.title(f"Intensity Distributions Before and After Background Subtraction mouse {mouse}")
     plt.xlabel("Session")
     plt.ylabel("Intensity")
     plt.legend(title="Subtracted", labels=["No", "Yes"])
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_cv_by_depth(df, session_ids, mouse):
+
+    plt.figure(figsize=(10, 5))
+    df["z_bin"] = (df["Center Z (px)"] // 5).astype(int)
+    for sid in session_ids:
+        z_col = "z_bin"
+        intensity_col = f"int_optimized_{sid}"
+        detected_in_session = df["detected_in_sessions"].apply(lambda s: sid in s)
+        detected = df[detected_in_session]
+        grouped = detected.groupby(z_col)[intensity_col]
+        mean = grouped.mean()
+        std = grouped.std()
+        cv = std / mean
+
+        plt.plot(cv.index, cv, label=sid)
+
+    plt.xlabel("Z (depth, px)")
+    plt.ylabel("CV (std/mean)")
+    plt.title(f"Coefficient of Variation by Depth mouse {mouse}")
+    plt.legend()
     plt.tight_layout()
     plt.show()

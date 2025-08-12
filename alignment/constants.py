@@ -24,7 +24,7 @@ ICY_COLNAMES = {'mean_intensity' : 'Mean Intensity (ch 0)',
 XY_SCALE = 1.19
 Z_SCALE = 2
 
-ALIGNMENT_SUBSTACK_SIZE = 5
+ALIGNMENT_SUBSTACK_SIZE = 3
 ALIGNMENT_SEARCH_WINDOW = 55
 
 COORDS_3D = [ICY_COLNAMES['zcol'], ICY_COLNAMES['ycol'], ICY_COLNAMES['xcol']]
@@ -76,4 +76,4 @@ ALIGNMENT_FNAMES = {'thresh' : "m{0}s{2}_r{1}_spots",
 'raw' : "m{0}s{2}_r{1}"}
 
 
-STACK_WINDOW = 7
+STACK_WINDOW = 13

@@ -194,15 +194,16 @@ def optimize_centroids(df, img, suff="", tolerance=constants.TOLERANCE, update_c
 
 def filter_border_cells(df, sessions, img_shape, nucl_size_half = 3):
     z, y, x = img_shape
-    for sid in sessions:       
-        df = df[
-            ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) > nucl_size_half) &
-            ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) < x - nucl_size_half) &
-            ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) > nucl_size_half) &
-            ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) < y - nucl_size_half) &
-            ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) > 2) &
-            ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) < z - 2)
-            ]
+    for sid in sessions:
+        if (f'int_optimized_{sid}' in df.columns):
+            df = df[
+                ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) > nucl_size_half) &
+                ((df[ICY_COLNAMES['xcol']] + df[f'shift_x_{sid}']) < x - nucl_size_half) &
+                ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) > nucl_size_half) &
+                ((df[ICY_COLNAMES['ycol']] + df[f'shift_y_{sid}']) < y - nucl_size_half) &
+                ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) > 2) &
+                ((df[ICY_COLNAMES['zcol']] + df[f'shift_z_{sid}']) < z - 2)
+                ]
     return df
 
 def calculate_background_for_cell(row, img, distance, suff):
