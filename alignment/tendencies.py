@@ -22,21 +22,22 @@ import cell_preprocessing as cp
 import pandas as pd
 
 import scipy.stats as stats
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
 import matplotlib.pyplot as plt
 import seaborn as sns
-import matplotlib.pyplot as plt
-import constants
+
 # from constants import ICY_COLNAMES, CTX_REGIONS
 import sys
 import yaml
 import gc
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/ctx_landmark_rev.yaml"
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
-
 
 #%%
 
@@ -46,69 +47,69 @@ OPT_PATH = config["experiment"]["optimized_path"]
 
 
 regions = config["experiment"]["regions"][0]
-group_session_order = config["experiment"]["session_order"][0]
+group_session_order = config["experiment"]["session_order"][0]#[1:-1]
 #%%
 import psutil, os
 def print_mem_usage():
     print("RAM used (MB):", psutil.Process(os.getpid()).memory_info().rss // 1024 // 1024)
 
 #%% BACKGROUND DATA CALCULATION
-regions=[[0,1]]
+# regions=[[0,1]]
 
-for m,r in regions:
-    if m == 2:
-        continue
-    bgrv = []
-    imgs = [utils.read_image(m, r, i, config) for i in group_session_order]#[1,2,3]]
-    df = pd.read_csv(DIR_PATH.format(m=m, r=r))
-    for i,img in enumerate(imgs):
-        bgr,cprod = cp.calculate_background_intensity(df, img)
-        b_mean = np.mean(bgr.bg_intensity)
-        b_std = np.std(bgr.bg_intensity)
-        bgrv += [[b_mean, b_std]]
-    idx_arr = []
-    bgr_data = pd.read_csv(BGR_DIR)
+# for m,r in regions:
+#     if m == 2:
+#         continue
+#     bgrv = []
+#     imgs = [utils.read_image(m, r, i, config) for i in group_session_order]#[1,2,3]]
+#     df = pd.read_csv(DIR_PATH.format(m=m, r=r))
+#     for i,img in enumerate(imgs):
+#         bgr,cprod = cp.calculate_background_intensity(df, img)
+#         b_mean = np.mean(bgr.bg_intensity)
+#         b_std = np.std(bgr.bg_intensity)
+#         bgrv += [[b_mean, b_std]]
+#     idx_arr = []
+#     bgr_data = pd.read_csv(BGR_DIR)
     
-    d = dict.fromkeys(bgr_data.columns, 0)
-    d['m'] = m
-    d['r'] = r 
-    for i, bgr in enumerate(bgrv):
-        d[f'mean{i}'] = bgr[0]
-        d[f'sdev{i}'] = bgr[1]
+#     d = dict.fromkeys(bgr_data.columns, 0)
+#     d['m'] = m
+#     d['r'] = r 
+#     for i, bgr in enumerate(bgrv):
+#         d[f'mean{i}'] = bgr[0]
+#         d[f'sdev{i}'] = bgr[1]
 
-    bgr_data.loc[len(bgr_data)] = d
+#     bgr_data.loc[len(bgr_data)] = d
 
-    bgr_data.drop(columns="Unnamed: 0", inplace=True)
-    bgr_data.to_csv(BGR_DIR)
+#     bgr_data.drop(columns="Unnamed: 0", inplace=True)
+#     bgr_data.to_csv(BGR_DIR)
 #%%
 #regions = [[2,1],[3,2],[4,2],[6,2], [7,1], [11,1], [14,1]]
 #regions = constants.LANDMARK_REGIONS + CTX_REGIONS
 
 #%% OPTIMIZE CENTROIDS AND MARK ON/OFF
-
+regions=[[1,1]]
 tendencies = []
 tendencies_on_off = []
 all_pooled = []
 ovlaps = []
 
-regions=[[0,1]]
+
 for m,r in regions:
     bgrv = []
     #imgs = [utils.read_image(m, r, i, config) for i in group_session_order]
-    tstx = intersession.pooled_cells(m,r, group_session_order, config, test=True)
+    tstx = intersession.pooled_cells(m,r, group_session_order, config, test=False)
     #all_pooled += [tstx]
     prev = tstx
     for i, session_id in enumerate(group_session_order):
         img = utils.read_image(m, r, session_id, config)
         df = cp.optimize_centroids(prev, img, suff=str(i))
         print("centroids optimized for session ", session_id)
-        bgr,_ = cp.calculate_background_intensity(df, img)
+        #bgr,_ = cp.calculate_background_intensity(df, img)
         print("background calculated for ", session_id)
-        b_mean = np.mean(bgr.bg_intensity)
-        b_std = np.std(bgr.bg_intensity)
-        threshold = b_mean + 6 * b_std
-        df[f'active{i}'] = df[f"int_optimized{i}"] > threshold#s pohl
-        bgrv += [[b_mean, b_std]]
+        #b_mean = np.mean(bgr.bg_intensity)
+        #b_std = np.std(bgr.bg_intensity)
+        #threshold = b_mean + 6 * b_std
+        #df[f'active{i}'] = df[f"int_optimized{i}"] > threshold#s pohl
+        #bgrv += [[b_mean, b_std]]
         prev = df
         print_mem_usage()
         
@@ -118,7 +119,7 @@ for m,r in regions:
         q1 = df["int_optimized"+i].quantile(0.9)
         idx_arr += [df[df["int_optimized"+i] <= q1].index]
         plt.hist(df["int_optimized"+i], bins = 40, alpha=0.5)
-    df.to_csv(OPT_PATH+f"m{m}r{r}.csv")
+    #df.to_csv(OPT_PATH+f"m{m}r{r}.csv")
    
     bgr_data = pd.read_csv(BGR_DIR)
     
@@ -134,7 +135,7 @@ for m,r in regions:
     bgr_data.drop(columns="Unnamed: 0", inplace=True)
     
     
-    bgr_data.to_csv(BGR_DIR)
+    #bgr_data.to_csv(BGR_DIR)
     s12 = len(set(idx_arr[0]) & set(idx_arr[1])) / len(idx_arr[0])
     s23 = len(set(idx_arr[1]) & set(idx_arr[2])) / len(idx_arr[1])
     ovlaps+=[[s12, s23]]    
@@ -144,7 +145,7 @@ for m,r in regions:
     tendencies_on_off += [intersession.find_intersession_tendencies_on_off(df, sessions=[0,1,2])]
 
 #%%
-sdfghj
+
 for m,r in regions:
     bgrv = []
     #imgs = [utils.read_image(m, r, i, config) for i in group_session_order]
@@ -183,10 +184,7 @@ def plot_tendencies(tendencies, title):
 #%% BARPLOT TENDENCIES
 
 
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import stats
-import seaborn as sns
+
 
 def plot_tendencies_b(tendencies, title):
     # Define groups and colors

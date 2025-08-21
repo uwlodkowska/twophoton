@@ -60,9 +60,19 @@ def read_pooled_with_background(mouse, region, config):
     
     df = cp.filter_border_cells(df, sessions, img.shape)
     for sid in sessions:
-        img = read_image(mouse, region, sid, config)
-        df = cp.find_background(df, img, suff=f"_{sid}")
+        if (f'int_optimized_{sid}' in df.columns):
+            img = read_image(mouse, region, sid, config)
+            df = cp.find_background(df, img, suff=f"_{sid}")
     return df
+
+def in_s(x, key):
+    if isinstance(x, (set, list, tuple)): return key in x
+    try:
+        # e.g. "['landmark1','ctx1']"
+        from ast import literal_eval
+        return key in set(literal_eval(x))
+    except Exception:
+        return str(key) in str(x)
 
 def read_images(mouse, region, session_ids, config):
     imgs = []
@@ -149,3 +159,16 @@ def get_optimized_cell_data(mouse, region, session_id,img, config):
                                        test=False, 
                                        optimized=False)[0]
     return cp.optimize_centroids(df, img, suff="", tolerance = 2)
+
+def z_scoring_binned(df, session_ids):
+    df["z_bin"] = (df[constants.ICY_COLNAMES["zcol"]] // 5).astype(int)
+    
+    
+    for sid in session_ids:
+        df[f"norm_{sid}"] = df.groupby("z_bin")[f"int_optimized_{sid}"].transform(
+            lambda x: (x - x.mean()) / x.std()
+        )
+        bgr_col = f"background_{sid}"
+        df[f"bgr_norm_{sid}"] = df.groupby("z_bin")[bgr_col].transform(lambda x: (x - x.mean()) / x.std())
+
+    return df

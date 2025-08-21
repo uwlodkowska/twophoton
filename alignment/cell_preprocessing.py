@@ -10,6 +10,8 @@ import pandas as pd
 from skimage import io
 from concurrent.futures import ProcessPoolExecutor
 from scipy.spatial import cKDTree
+from scipy.stats import median_abs_deviation as mad
+from statsmodels.nonparametric.smoothers_lowess import lowess
 
 import utils
 from constants import ICY_COLNAMES
@@ -299,9 +301,135 @@ def calculate_background_intensity(df, img):
 
     return bg_df, None
     
+def z_score_intensity(df, session_ids):
+    """Per-session, per-mouse robust z-score: (x - median) / (1.4826*MAD)."""
+    out = df.copy()
+    for sid in session_ids:
+        intensity_col = f'int_optimized_{sid}'
+        if intensity_col not in df.columns:
+            continue
+        intensity_s = out[intensity_col]
+        out[f'{intensity_col}_z'] = (intensity_s - intensity_s.median())/(1.4826*mad(intensity_s, nan_policy='omit') + 1e-9)
+
+    return out
+
+def intensity_depth_detrend(
+    df: pd.DataFrame,
+    session_ids,
+    z_col: str = ICY_COLNAMES['zcol'],
+    frac: float = 0.3,        # LOWESS span
+    bin_width: float = 5.0,   # depth-bin width (same units as z_col)
+    use_log1p: bool = True,
+    eps: float = 1e-9,
+    intensity_prefix: str = "int_optimized_",
+    background_prefix: str = "background_",
+    k_dim: float = 4.0,       # “mean − k·MAD of background residual” threshold
+) -> pd.DataFrame:
+    """
+    For each session:
+      - Build intensity signal S_I = intensity - background; background S_B = background.
+      - Optional log1p to both.
+      - LOWESS detrend both vs depth.
+      - Per depth bin (shared bins across both signals):
+          * sigma_I = 1.4826*MAD(resid_I)   -> intensity scale
+          * sigma_B = 1.4826*MAD(resid_B)   -> background scale (SNR)
+          * mu_B    = mean(resid_B)
+      - Outputs:
+          * int_z  = resid_I / sigma_I   (your current GEE “SD” scale)
+          * bg_z   = resid_I / sigma_B   (SNR-like)
+          * bg_only_z = resid_B / sigma_B (diagnostics)
+      - Optional filter flag: resid_I < mu_B - k_dim*sigma_B (dimmer than background).
+    """
+    out = df.copy()
+
+    # Depth and bins
+    z = pd.to_numeric(out[z_col], errors="coerce").astype(float).values
+    z_min, z_max = np.nanmin(z), np.nanmax(z)
+    edges = np.arange(np.floor(z_min), np.ceil(z_max) + bin_width, bin_width)
+    z_bin = pd.cut(z, bins=edges, right=False, include_lowest=True, labels=False)
+
+    def _lowess(y, x):
+        order = np.argsort(x)
+        xs, ys = x[order], y[order]
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        trend_s = np.full_like(ys, np.nan, dtype=float)
+        if ok.any():
+            trend_s[ok] = lowess(ys[ok], xs[ok], frac=frac, it=2, return_sorted=False)
+        trend = np.full_like(y, np.nan, dtype=float)
+        finite = np.isfinite(xs) & np.isfinite(trend_s)
+        if finite.sum() >= 2:
+            trend[:] = np.interp(x, xs[finite], trend_s[finite])
+        return trend
+
+    def _robust_scale(s):
+        # returns 1.4826*MAD per bin (robust sd)
+        ser = pd.Series(s)
+        sig = ser.groupby(z_bin).transform(lambda r: 1.4826 * mad(r, nan_policy="omit")).astype(float)
+        if sig.isna().any():
+            med = np.nanmedian(sig.values)
+            sig = sig.fillna(med if np.isfinite(med) else 1.0)
+        sig = sig.replace(0.0, eps)
+        return sig
+
+    # optional global dim mask (OR across sessions)
+    dim_mask_global = np.zeros(len(out), dtype=bool)
+
+    for sid in session_ids:
+        Icol = f"{intensity_prefix}{sid}"
+        Bcol = f"{background_prefix}{sid}"
+        if Icol not in out.columns or Bcol not in out.columns:
+            continue
+
+        I = pd.to_numeric(out[Icol], errors="coerce").values
+        B = pd.to_numeric(out[Bcol], errors="coerce").values
+
+        SI = I - B     # intensity signal
+        SB = B         # background signal
+
+        if use_log1p:
+            SI = np.log1p(SI)
+            SB = np.log1p(SB)
+
+        muI = _lowess(SI, z); residI = SI - muI
+        muB = _lowess(SB, z); residB = SB - muB
+
+        # per-bin scales
+        sigma_I = _robust_scale(residI)  # intensity MAD
+        sigma_B = _robust_scale(residB)  # background MAD
+        mean_B  = pd.Series(residB).groupby(z_bin).transform(lambda r: np.nanmean(r)).astype(float)
+
+        # standardized outputs
+        int_z  = residI / sigma_I.values     # your existing SD scale
+        bg_z   = residI / sigma_B.values     # SNR-like
+        bg_only_z = residB / sigma_B.values  # diagnostics
+
+        out[f"{Icol}_rstd"] = int_z
+        out[f"{Icol}_bgz"]  = bg_z
+        out[f"{Bcol}_rstd"]  = bg_only_z
+
+        # optional prefilter (dimmer than background)
+        #out[f"is_dim_by_bg_{sid}"] = residI < (mean_B.values - k_dim * sigma_B.values)
+
+        bg_mean = df.groupby(z_bin)[f"background_{sid}"].transform("mean")
+        bg_std  = df.groupby(z_bin)[f"background_{sid}"].transform("std")
+        threshold = bg_mean + 6.0 * bg_std
+        out[f"is_dim_by_bg_{sid}"] = (out[Icol] < threshold)
 
 
 
+    return out
+
+def classify_by_rstd(df, id_pairs, tau=0.9):
+    res = df.copy()
+    for id1, id2 in id_pairs:
+        a = f'int_optimized_{id1}_rstd'
+        b = f'int_optimized_{id2}_rstd'
+        outcol = f'{id1}_to_{id2}'
+        d = res[b] - res[a]
+        res[outcol] = 'stable'
+        res.loc[d >  tau, outcol] = 'up'
+        res.loc[d < -tau, outcol] = 'down'
+    return res
 
 
 def test_fun(mouse, region, s_idxses, session_order):

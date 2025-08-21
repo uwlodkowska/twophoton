@@ -196,16 +196,18 @@ s = from_indicators(session_order, all_cells[session_order])
 # 2) custom intersection order:
 #    sort by degree (number of sessions in intersection), and inside *each degree*
 #    sort by decreasing size
-tmp = s.reset_index()
-tmp.columns = list(tmp.columns[:-1]) + ["size"]  # last column renamed to 'size'
+tmp = s.index.to_frame(index=False)   # columns: same as session_order
+
+
+tmp["size"] = s.value_counts()
 tmp["degree"] = tmp[session_order].sum(axis=1)
-# choose degree order: e.g. 1,2,3,... (ascending) or reverse it (descending)
-# Here: degree ascending, size descending within degree
-order_idx = (
-    tmp.sort_values(["degree", "size"], ascending=[True, False])
-       .set_index(session_order)
-       .index
-)
+
+# Sort intersections: first by degree (e.g., high→low), then by size (high→low)
+order_idx = (tmp.sort_values(["degree", "size"], ascending=[False, False])
+               .set_index(session_order)
+               .index)
+
+# Reindex the Series to this custom order
 s_sorted = s.reindex(order_idx)
 
 # 3) plot: disable built-in sorting so our order is respected
