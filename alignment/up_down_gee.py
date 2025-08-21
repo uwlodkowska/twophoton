@@ -175,7 +175,7 @@ def build_long(df,
         tmp['y_up']     = (tmp[col] == 'up').astype(int)
         tmp['y_down']   = (tmp[col] == 'down').astype(int)
         tmp['is_bgr']   = df['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) and utils.in_s(x, id2)))
-        tmp['is_bgr'] = ~(tmp['n_sessions'] ==4)
+        tmp['is_bgr'] = ~(tmp['n_sessions'] ==5)
         
         recs.append(tmp)
     long = pd.concat(recs, ignore_index=True)
@@ -237,7 +237,7 @@ def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.co
     print("QIC up: ",qic_up,"QIC down: ",qic_down)
     #print(gee_up.summary())
     #print(gee_down.summary())
-    return gee_up, gee_down
+    return gee_up, gee_down, w
 
 #%%
 long_nobgr, _ = build_long(classified_df, pairs ,group_cols=(['mouse']), method="robust")
@@ -357,25 +357,9 @@ def _contrast_vs_ref_p(names, beta, V, pair_label, ref_label):
     p   = 2*(1 - norm.cdf(abs(z))) if np.isfinite(z) else np.nan
     return est, se, z, p
 
-def pair_prob_ci_avgpred(res, df, pair_label, alpha=0.05):
-    d = df.copy()
-    ALL_LEVELS = df["pair"].unique().tolist()
-
-    d["pair"] = pd.Categorical([pair_label]*len(d), categories=ALL_LEVELS)
-    formula = f'1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference="landmark1_landmark2"))'
-    X = pt.dmatrix(formula, d, return_type='dataframe')
-
-    eta = X @ res.params.values
-    p_i = 1.0 / (1.0 + np.exp(-eta))
-    p_bar = float(p_i.mean())
-
-    p_arr = np.asarray(p_i)
-    X_arr = np.asarray(X)
-    grad = (p_arr * (1 - p_arr))[:, None] * X_arr
-    grad = grad.mean(axis=0)
-    
-        
-    V = res.cov_params().values
+def pair_prob_ci_avgpred(res, df, pair_label, alpha=0.05, weights=None):
+    p_bar, grad = pair_emm_and_grad(res, df, pair_label, weights=weights)
+    V = np.asarray(res.cov_params(), dtype=float)
     var = float(grad @ V @ grad)
     se = var**0.5
 
@@ -399,10 +383,65 @@ def _pair_avgpred_and_grad(res, df, pair_label):
     grad = grad.mean(axis=0)
     return p_bar, grad
 
-def _LL_vs_avg_stats(res, df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=None):
+def pair_emm_and_grad(res, df, pair_label, mouse_col="mouse", weights=None):
+    """
+    EMM on the probability scale for a given pair level, with a delta-method gradient
+    that matches the averaging scheme.
+
+    If row_weights is None, we compute a mouse-balanced EMM:
+      - predict for each row with pair fixed to `pair_label`
+      - average within mouse (simple mean of that mouse's rows)
+      - average equally across mice
+    If row_weights is provided (1-D array aligned to df), we do a weighted average
+    using those same weights (normalized to sum to 1).
+    """
+    d = df.copy()
+    all_levels = pd.Categorical(df["pair"]).categories
+    d["pair"] = pd.Categorical([pair_label]*len(d), categories=all_levels)
+
+    formula = '1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference="landmark1_landmark2"))'
+    X = pt.dmatrix(formula, d, return_type='dataframe')
+
+    eta = X @ res.params.values
+    p   = 1.0 / (1.0 + np.exp(-eta))
+    p = np.asarray(p, dtype=float).reshape(-1)
+    print(weights)
+    if weights is not None:
+        w = np.asarray(weights, dtype=float).reshape(-1)
+        w = w / w.sum()
+        p_bar = float((w * p).sum())
+        # gradient: d mean / d beta = sum_i w_i * p_i*(1-p_i) * x_i
+        X_arr = np.asarray(getattr(X, "values", X))
+        grad  = (w[:,None] * (p*(1-p))[:,None] * X_arr).sum(axis=0)
+        return p_bar, grad
+
+    # mouse-balanced (each mouse contributes equally)
+    X_arr = np.asarray(getattr(X, "values", X))
+    d_ = pd.DataFrame({"mouse": d[mouse_col].values, "p": np.asarray(p)})
+    by_mouse = d_.groupby("mouse")["p"].mean()
+    p_bar = float(by_mouse.mean())
+
+    # For the gradient, apply the same two-step averaging:
+    # 1) within-mouse mean = (1/n_m) sum_i p_i*(1-p_i) x_i
+    # 2) across mice mean  = mean over mice
+    mats = []
+    for m, idx in d.groupby(mouse_col).groups.items():
+        idx = np.asarray(list(idx))
+        Xm  = X_arr[idx, :]
+        pm  = np.asarray(p)[idx]
+        gm  = (pm*(1-pm))[:,None] * Xm
+        mats.append(gm.mean(axis=0))
+    grad = np.vstack(mats).mean(axis=0)
+    return p_bar, grad
+
+
+def _LL_vs_avg_stats(res, df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=None, weights = None):
     # LC and CC: marginal means + gradients
-    p_LC, g_LC = _pair_avgpred_and_grad(res, df, LC_label)
-    p_CC, g_CC = _pair_avgpred_and_grad(res, df, CC_label)
+    # p_LC, g_LC = _pair_avgpred_and_grad(res, df, LC_label)
+    # p_CC, g_CC = _pair_avgpred_and_grad(res, df, CC_label)
+
+    p_LC, g_LC = pair_emm_and_grad(res, df, LC_label, weights = weights)
+    p_CC, g_CC = pair_emm_and_grad(res, df, CC_label, weights = weights)
 
     # Average of LC and CC
     p_avg  = 0.5 * (p_LC + p_CC)
@@ -411,7 +450,9 @@ def _LL_vs_avg_stats(res, df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t
     se_avg  = np.sqrt(max(var_avg, 0.0))
 
     # REF on the same scale
-    p_REF, g_REF = _pair_avgpred_and_grad(res, df, "landmark1_landmark2")
+    #p_REF, g_REF = _pair_avgpred_and_grad(res, df, "landmark1_landmark2")
+    
+    p_REF, g_REF = pair_emm_and_grad(res, df, "landmark1_landmark2", weights = weights)
 
     # Contrast (REF − AVG) on probability scale
     delta   = p_REF - p_avg
@@ -475,7 +516,7 @@ def sweep_gee_to_csv(
 
         # fit
         
-        gee_up, gee_down = fit_fn(long_df, cov_type="robust", cov_struct=Exchangeable(), weighted=weighted)
+        gee_up, gee_down, weights = fit_fn(long_df, cov_type="robust", cov_struct=Exchangeable(), weighted=weighted)
         rho_hat = float(gee_up.cov_struct.dep_params) 
         rho_hat_d = float(gee_down.cov_struct.dep_params)      # or res.cov_struct.dep_params[0]
         
@@ -484,7 +525,7 @@ def sweep_gee_to_csv(
         ex_qic_up = gee_up.qic(scale=1.0)
         ex_qic_down = gee_down.qic(scale=1.0)
     
-        gee_up, gee_down = fit_fn(long_df, weighted=weighted)
+        gee_up, gee_down,weights = fit_fn(long_df, weighted=weighted)
         
         print(gee_up.summary())
         print(gee_down.summary())
@@ -520,8 +561,8 @@ def sweep_gee_to_csv(
                     p_logit = 2 * stats.t.sf(abs(z), df_t)
             
                 # --- PROBABILITY-SCALE Wald test (Δp via delta method, averaged over covariates)
-                p_pair, g_pair = _pair_avgpred_and_grad(res, long_df, pair_lab)
-                p_ref,  g_ref  = _pair_avgpred_and_grad(res, long_df, "landmark1_landmark2")
+                p_pair, g_pair = pair_emm_and_grad(res, long_df, pair_lab, weights=weights)
+                p_ref,  g_ref  = pair_emm_and_grad(res, long_df, "landmark1_landmark2", weights=weights)
                 Vnp = res.cov_params().values
                 delta   = p_pair - p_ref
                 g_delta = g_pair - g_ref
@@ -530,7 +571,7 @@ def sweep_gee_to_csv(
                 p_prob   = (2 * stats.t.sf(abs(z_delta), df_t)) if df_t is not None else (2 * norm.sf(abs(z_delta)))
             
                 # --- Probabilities & CI you display (avg-of-predictions)
-                pr = pair_prob_ci_avgpred(res, long_df, pair_lab)
+                pr = pair_prob_ci_avgpred(res, long_df, pair_lab, weights=weights)
             
                 tmp[key] = dict(
                     p_prob=p_prob, p_logit=p_logit,
@@ -540,7 +581,7 @@ def sweep_gee_to_csv(
                 pvals_prob.append(p_prob)
                 pvals_logit.append(p_logit)
                 
-            ref = pair_prob_ci_avgpred(res, long_df, "landmark1_landmark2")
+            ref = pair_prob_ci_avgpred(res, long_df, "landmark1_landmark2", weights=weights)
             se_prob_ref = ref["se_prob"]
 
             
@@ -563,7 +604,7 @@ def sweep_gee_to_csv(
 
             # avg(LC,CC) block + delta p and LL vs avg p
             V = res.cov_params().values  # ensure V matches this res
-            avgd = _LL_vs_avg_stats(res, long_df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=df_t)
+            avgd = _LL_vs_avg_stats(res, long_df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=df_t, weights=weights)
             x_ref = _x_for_pair(names, ref_label)
             x_LC  = _x_for_pair(names, LC_label)
             x_CC  = _x_for_pair(names, CC_label)
@@ -657,7 +698,7 @@ def sweep_gee_to_csv(
 
 sweep_thresholds([0.5, 0.75, 1, 1.25], classify_transitions, build_long, fit_gees, contrast_fn=None)
 
-#%%
+#%% main sweeper call
 
 thresholds = [0.5, 0.75, 1, 1.25]
 sweep_gee_to_csv(
@@ -667,9 +708,10 @@ sweep_gee_to_csv(
     fit_gees,                 # function(long_df, cov_type) -> (gee_up, gee_down)
     pairs,                  # list of (before, after, label)
     SESSIONS,               # SESSIONS
-    cells_label="test_spec",
+    cells_label="always_active_weighted",
     ref_label="landmark1_to_landmark2",
-    map_cols=("s0_landmark1","landmark2_ctx1","ctx1_ctx2")  # order: s0_l1, l2_c1, c1_c2
+    map_cols=("s0_landmark1","landmark2_ctx1","ctx1_ctx2"),  # order: s0_l1, l2_c1, c1_c2
+    weighted = True
 )
 
 
@@ -719,13 +761,13 @@ pair_key_map = {
     "landmark2_ctx1": "l2_c1",
     "ctx1_ctx2": "c1_c2",
 }
-CSV_PATH = "/mnt/data/fos_gfp_tmaze/results/gee_transition/always_active.csv"
+CSV_PATH = "/mnt/data/fos_gfp_tmaze/results/gee_transition/always_active_weighted.csv"
 summary_df = pd.read_csv(CSV_PATH)
 
 overlay_up = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_up", pair_key_map)
 overlay_down = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_down", pair_key_map)
 #%%
-for cutoff in [0.5,0.75,1,1.25]:    
+for cutoff in [1]:    
     classified_df = classify_transitions(all_mice, pairs, session_ids = SESSIONS, sd_threshold = cutoff, method = 'robust')
     long_nobgr, _ = build_long(classified_df, pairs ,group_cols=(['mouse']), method="robust")
     overlay_up = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_up", pair_key_map)
@@ -742,3 +784,17 @@ gp.fig_fragility_p_vs_cutoff(CSV_PATH, "DOWN", y_max=1.2, title="DOWN — p vs c
 gp.fig_fragility_p_vs_cutoff(CSV_PATH, "UP",   y_max=1.2, title="UP — p vs cutoff",   ax=axs[1])
 
 fig.tight_layout()
+#%%
+
+def loo_emm(resolver_fit_fn, long_df, pairs, weighted=True):
+    mice = long_df["mouse"].unique()
+    out = []
+    for m in mice:
+        d_ = long_df[long_df["mouse"] != m]
+        gee_up, gee_down, w = resolver_fit_fn(d_, weighted=weighted)
+        for lbl in pairs:  # e.g. ["s0_l1","l2_c1","c1_c2"]
+            p_up, _   = pair_emm_and_grad(gee_up,   d_, lbl, weights=w)
+            p_down, _ = pair_emm_and_grad(gee_down, d_, lbl, weights=w)
+            out.append({"left_out": m, "pair": lbl, "UP": p_up, "DOWN": p_down})
+    return pd.DataFrame(out)
+#%%
