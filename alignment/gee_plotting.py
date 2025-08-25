@@ -286,7 +286,7 @@ def fig_pair_effect_at_cutoff(
         ref_p  = float(row[f"{ref_key}_coeff"])
         ref_lo = float(row[f"{ref_key}_CI_low"])
         ref_hi = float(row[f"{ref_key}_CI_hi"])
-        ax.axvspan(ref_lo, ref_hi, color="0.85", alpha=0.6, zorder=0, label="Para referencyjna ±95% CI")
+        ax.axvspan(ref_lo, ref_hi, color="0.85", alpha=0.6, zorder=0, label="Para referencyjna (L1→L2) 95% CI")
         ax.axvline(ref_p, linestyle=":", color="0.4", linewidth=1.2, zorder=1)
 
     # Optional: per-mouse raw points (grey jitter)
@@ -306,13 +306,13 @@ def fig_pair_effect_at_cutoff(
                 mean_pm, lo_pm, hi_pm = per_mouse_overlay[pair_key]
                 if np.isfinite(lo_pm) and np.isfinite(hi_pm):
                     ax.hlines(yi, lo_pm, hi_pm, linewidth=1.4, color="C0",
-                              label="Śr. po osobnikach ±95% CI" if yi == y_positions[0] else None, zorder=3)
+                              label="Śr. po osobnikach 95% CI" if yi == y_positions[0] else None, zorder=3)
                 if np.isfinite(mean_pm):
                     ax.plot([mean_pm], [yi], marker="s", mfc="white", mec="C0", mew=1.2, zorder=4)
 
     # GEE marginal: thick bar + red dot
     ax.hlines(y_positions, gee_lo, gee_hi, linewidth=3.0, color="C3", zorder=5)
-    ax.plot(gee_prob, y_positions, "o", color="C3", ms=6, label="GEE: est. marginalna (95% CI)", zorder=6)
+    ax.plot(gee_prob, y_positions, "o", color="C3", ms=6, label="GEE: est. marginalna 95% CI", zorder=6)
 
     # Cosmetics
     ax.set_yticks(y_positions)
@@ -339,14 +339,14 @@ def fig_pair_effect_at_cutoff(
 
     ax.set_xlabel("Prawdopodobieństwo")
     if title is None:
-        title = f"{direction} @ {cutoff} SD — efekt par"
+        title = f"EMM - model {direction}, próg {cutoff} rSD"
     ax.set_title(title)
 
     # Legend: unique labels, consistent order
     handles, labels = ax.get_legend_handles_labels()
     seen, h_clean, l_clean = set(), [], []
     # prefer order: ref band, per-mouse points, per-mouse mean, GEE
-    preferred = ["Para referencyjna ±95% CI", "Osobniki (proporcje)", "Śr. po osobnikach ±95% CI", "GEE: est. marginalna (95% CI)"]
+    preferred = ["Para referencyjna L1→L2 95% CI", "Osobniki (proporcje)", "Śr. po osobnikach 95% CI", "GEE: est. marginalna (95% CI)"]
     for pref in preferred:
         for h, lab in zip(handles, labels):
             if lab == pref and lab not in seen:
@@ -386,16 +386,17 @@ def fig_fragility_p_vs_cutoff(csv_path, direction, y_max = 1, save_path=None, ti
 
     # global (Wald) p across all pairs (helps readers see overall sensitivity)
     if "group wald p" in d.columns:
-        ax.plot(x, d["group wald p"].values, marker="s", linewidth=2, label="omnibus Wald")
+        ax.plot(x, d["group wald p"].values, marker="s", linewidth=2, label="omnibus")
 
     ax.axhline(0.05, linestyle=":", linewidth=1)
-    ax.set_xlabel("Próg SD")
+    ax.set_xlabel("Próg rSD")
     ax.set_ylabel("p-wartość")
     if title is None:
         title = f"{direction} — wrażliwość na próg (p vs cutoff)"
     ax.set_title(title)
     ax.set_ylim(0, y_max)
     ax.legend(frameon=False, ncol=2)
+    
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -455,30 +456,234 @@ def build_per_mouse_overlay(
 
 
 #%%
-df = pd.read_csv(CSV_PATH)
-LENIENT = 0.5
-df["sd cutoff"] == 0.5
-#%%
-# MAIN FIGURE
-# plot_forest_at_cutoff(df, "DOWN", 0.75, save_path="/mnt/data/fig1A_down_forest.png")
-# plot_forest_at_cutoff(df, "UP",   0.75, save_path="/mnt/data/fig1B_up_forest.png")
 
-# # SUPPLEMENT
-# plot_p_vs_cutoff(df, "DOWN", save_path="/mnt/data/figS1_down_p.png")
-# plot_p_vs_cutoff(df, "UP",   save_path="/mnt/data/figS1_up_p.png")
-# plot_prob_vs_cutoff(df, "DOWN", save_path="/mnt/data/figS2_down_prob.png")
-# plot_prob_vs_cutoff(df, "UP",   save_path="/mnt/data/figS2_up_prob.png")
 
-# #%%
-# fig_pair_effect_at_cutoff(CSV_PATH, "DOWN", LENIENT,
-#                           per_mouse_overlay=None,
-#                           save_path="/mnt/data/fig_pair_down.png")
+PAIRS = [('s0_l1','S0→L1'), ('l2_c1','L2→C1'), ('c1_c2','C1→C2')]
 
-# # Panel A’ (UP at the same cutoff, to show it’s absent/fragile)
-# fig_pair_effect_at_cutoff(CSV_PATH, "UP", LENIENT,
-#                           per_mouse_overlay=None,
-#                           save_path="/mnt/data/fig_pair_up.png")
+def _load_table(csv_path, direction, what_cells='active_in_both'):
+    d = pd.read_csv(csv_path)
+    m = (d['direction'] == direction)
+    if 'what cells' in d.columns and what_cells is not None:
+        m &= (d['what cells'] == what_cells)
+    d = d.loc[m].copy().sort_values('sd cutoff')
+    if d.empty:
+        raise ValueError("No rows for the requested direction/what_cells.")
+    return d
 
-# # Panel B (fragility/sensitivity)
-# fig_fragility_p_vs_cutoff(CSV_PATH, "DOWN", save_path="/mnt/data/fig_frag_down.png")
-# fig_fragility_p_vs_cutoff(CSV_PATH, "UP",   save_path="/mnt/data/fig_frag_up.png")
+def _detect_count_columns(df, explicit=None):
+    """Return (median, min, max) column names or None if not found."""
+    if explicit is not None:
+        if all(c in df.columns for c in explicit):
+            return explicit
+        raise ValueError(f"Count columns {explicit} not found. Available: {list(df.columns)}")
+    candidates = [
+        ('eligible_cells_median','eligible_cells_min','eligible_cells_max'),
+        ('eligible_median','eligible_min','eligible_max'),
+        ('cells_median','cells_min','cells_max'),
+        ('per_mouse_median','per_mouse_min','per_mouse_max'),
+        ('n_med','n_min','n_max'),
+        ('med_cells','min_cells','max_cells'),
+    ]
+    for trio in candidates:
+        if all(c in df.columns for c in trio):
+            return trio
+    return None
+
+def plot_p_vs_cutoff_with_counts(csv_path, direction, what_cells='active_in_both',
+                                 use_holm=True, y_max=1.0, ref_vlines=(0.75, 1.0),
+                                 count_cols=None, title=None):
+    """
+    Left axis: p-values across cutoffs for each pair (+ omnibus).
+    Right axis: eligible cells per mouse (median with min–max band).
+    """
+    d = _load_table(csv_path, direction, what_cells)
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.6))
+
+    # ---- p-value lines (left axis)
+    suffix = 'Holm_prob' if use_holm else 'p_prob'
+    for key, label in PAIRS:
+        col = f'{key}_{suffix}'
+        if col in d:
+            ax.plot(d['sd cutoff'], d[col], marker='o', linestyle='-', label=label)
+
+    if 'group wald p' in d:
+        ax.plot(d['sd cutoff'], d['group wald p'], marker='s', linestyle='--',
+                linewidth=2, label='Omnibus Wald')
+
+    for v in (ref_vlines or []):
+        ax.axvline(float(v), linestyle='--', linewidth=1, alpha=0.6)
+
+    ax.axhline(0.05, linestyle=':', linewidth=1)
+    ax.set_ylim(0, y_max)
+    ax.set_xlabel('Próg (rSD)')
+    ax.set_ylabel('p-wartość')
+
+    # ---- counts panel (right axis)
+    cols = _detect_count_columns(d, explicit=count_cols)
+    ax2 = None
+    if cols is not None:
+        med_col, min_col, max_col = cols
+        counts = (d[['sd cutoff', med_col, min_col, max_col]]
+                  .groupby('sd cutoff', as_index=False).first())  # if repeated rows
+        ax2 = ax.twinx()
+        ax2.plot(counts['sd cutoff'], counts[med_col], marker='D', linestyle='--',
+                 alpha=0.9, label='Mediana #kom./mysz')
+        ax2.fill_between(counts['sd cutoff'], counts[min_col], counts[max_col],
+                         alpha=0.12, label='[min, max]')
+        ax2.set_ylabel('Liczba kwalif. komórek / mysz')
+        ax2.set_ylim(bottom=0)
+
+        # merged legend
+        h1, l1 = ax.get_legend_handles_labels()
+        h2, l2 = ax2.get_legend_handles_labels()
+        ax.legend(h1+h2, l1+l2, frameon=False, ncol=2)
+
+    if title is None:
+        title = f'{direction}: p vs próg ({"Holm" if use_holm else "surowe"})'
+    ax.set_title(title)
+    plt.tight_layout()
+    return (fig, ax, ax2)
+
+
+
+def plot_emm_vs_cutoff(csv_path, direction, what_cells='active_in_both',
+                       ref_vlines=(0.75, 1.0), title=None):
+    """
+    EMM probabilities with 95% CIs across cutoffs for each pair.
+    """
+    print(csv_path, what_cells)
+    d = _load_table(csv_path, direction, what_cells)
+    fig, ax = plt.subplots(figsize=(6.0, 3.6))
+
+    for key, label in PAIRS:
+        coeff = f'{key}_coeff'; lo = f'{key}_CI_low'; hi = f'{key}_CI_hi'
+        if coeff in d and lo in d and hi in d:
+            x = d['sd cutoff'].to_numpy()
+            y = d[coeff].to_numpy()
+            ylo = d[lo].to_numpy(); yhi = d[hi].to_numpy()
+            err = [y - ylo, yhi - y]
+            ax.errorbar(x, y, yerr=err, fmt='o-', capsize=3, label=label)
+
+    # (optional) show reference pair (L1→L2) if present
+    if {'ref_coeff','ref_CI_low','ref_CI_hi'}.issubset(d.columns):
+        ax.plot(d['sd cutoff'], d['ref_coeff'], linestyle=':', linewidth=1.5, label='REF (L1→L2)')
+
+    for v in ref_vlines or []:
+        ax.axvline(float(v), linestyle='--', linewidth=1, alpha=0.6)
+
+    ax.set_xlabel('Próg (rSD)')
+    ax.set_ylabel('Prawdopodobieństwo (EMM)')
+    ax.set_ylim(0, 0.3)
+    if title is None:
+        title = f'{direction}: EMM vs próg'
+    ax.set_title(title)
+    ax.legend(frameon=False, ncol=2)
+    plt.tight_layout()
+    return fig, ax
+
+
+
+def plot_counts_by_cutoff_per_pair(
+    csv_path: str,
+    direction: str = "UP",
+    pairs: list = None,
+    title: str = None,
+    show_bands: bool = True
+):
+    """
+    Build one plot with a line per session pair across all cutoffs.
+    For each pair & cutoff:
+      n_min = CI_low * cluster_min (floored)
+      n_mid = prob   * cluster_mean (rounded)
+      n_max = CI_hi  * cluster_max (ceiled)
+
+    Expected columns in CSV:
+      'sd cutoff', 'direction', 'cluster_min/mean/max' and per-pair fields:
+        s0_l1_p_prob, s0_l1_CI_low, s0_l1_CI_hi
+        c1_c2_p_prob, c1_c2_CI_low, c1_c2_CI_hi
+        l2_c1_p_prob, l2_c1_CI_low, l2_c1_CI_hi
+        ref_coeff,   ref_CI_low,   ref_CI_hi
+    """
+    df = pd.read_csv(csv_path)
+
+    if pairs is None:
+        pairs = ["ref","s0l1","c1c2","l2c1"]
+
+    stem_map = {
+        "s0l1": ("s0_l1_coeff", "s0_l1_CI_low", "s0_l1_CI_hi"),
+        "c1c2": ("c1_c2_coeff", "c1_c2_CI_low", "c1_c2_CI_hi"),
+        "l2c1": ("l2_c1_coeff", "l2_c1_CI_low", "l2_c1_CI_hi"),
+        "ref":  ("ref_coeff",    "ref_CI_low",   "ref_CI_hi"),  # prob-scale mid from ref_coeff
+    }
+
+    # Coerce numerics (robust against string-typed numbers)
+    num_cols = ['sd cutoff','cluster_min','cluster_mean','cluster_max',
+                'ref_coeff','ref_CI_low','ref_CI_hi',
+                's0_l1_p_prob','s0_l1_CI_low','s0_l1_CI_hi',
+                'c1_c2_p_prob','c1_c2_CI_low','c1_c2_CI_hi',
+                'l2_c1_p_prob','l2_c1_CI_low','l2_c1_CI_hi']
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+    # Filter by UP/DOWN
+    d = df[df["direction"] == direction].copy()
+    if d.empty:
+        raise ValueError(f"No rows for direction={direction!r}")
+
+    # Build long-form table with counts per pair×cutoff
+    rows = []
+    for key in pairs:
+        if key not in stem_map:
+            raise ValueError(f"Unknown pair key: {key}")
+        prob_col, lo_col, hi_col = stem_map[key]
+        for c in [prob_col, lo_col, hi_col]:
+            if c not in d.columns:
+                raise ValueError(f"Missing column for pair {key}: {c}")
+        sub = d[["sd cutoff","cluster_min","cluster_mean","cluster_max",
+                 prob_col, lo_col, hi_col]].copy()
+        sub = sub.rename(columns={
+            "sd cutoff": "cutoff", prob_col: "prob", lo_col: "ci_low", hi_col: "ci_hi"
+        })
+        sub["n_min"] = np.floor(sub["ci_low"].clip(lower=0) * sub["cluster_min"]).astype("Int64")
+        sub["n_mid"] = (sub["prob"].clip(lower=0) * sub["cluster_mean"]).round().astype("Int64")
+        sub["n_max"] = np.ceil(sub["ci_hi"].clip(lower=0) * sub["cluster_max"]).astype("Int64")
+        sub["pair"]  = key
+        rows.append(sub)
+
+    long = pd.concat(rows, ignore_index=True).sort_values(["pair","cutoff"])
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(9, 6))
+    color_map = {"ref":"#1f77b4","s0l1":"#ff7f0e","c1c2":"#2ca02c","l2c1":"#d62728"}  # distinct colors by request
+
+    for key, grp in long.groupby("pair"):
+        grp = grp.sort_values("cutoff")
+        x = grp["cutoff"].astype(float).values
+        y = grp["n_mid"].astype(float).values
+        if show_bands:
+            ylo = grp["n_min"].astype(float).values
+            yhi = grp["n_max"].astype(float).values
+            ax.fill_between(x, ylo, yhi, alpha=0.18, label=f"{key} min..max", color=color_map.get(key))
+        ax.plot(x, y, marker="o", linewidth=2, label=f"{key} mid", color=color_map.get(key))
+
+    ax.set_xlabel("Cutoff (SD)")
+    ax.set_ylabel("Estimated # cells in class")
+    ax.set_title(title or f"Counts vs cutoff per pair — direction: {direction}")
+    ax.grid(True, alpha=0.3)
+
+    # Compact legend with only pair names (mid lines)
+    handles, labels = ax.get_legend_handles_labels()
+    mid_entries = [(h, l) for h, l in zip(handles, labels) if l.endswith(" mid")]
+    if mid_entries:
+        handles2, labels2 = zip(*mid_entries)
+        ax.legend(handles2, [l.replace(" mid","") for l in labels2], title="Session pair", loc="best")
+    else:
+        ax.legend(loc="best")
+
+    fig.tight_layout()
+
+
+    return long
+
