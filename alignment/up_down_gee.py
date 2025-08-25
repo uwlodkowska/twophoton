@@ -24,7 +24,7 @@ from scipy import stats
 from constants import ICY_COLNAMES
 import statsmodels.api as sm
 import gee_plotting as gp
-
+from scipy.stats import f as fdist
 #%% config
 
 config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
@@ -175,7 +175,7 @@ def build_long(df,
         tmp['y_up']     = (tmp[col] == 'up').astype(int)
         tmp['y_down']   = (tmp[col] == 'down').astype(int)
         tmp['is_bgr']   = df['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) and utils.in_s(x, id2)))
-        tmp['is_bgr'] = ~(tmp['n_sessions'] ==5)
+        tmp['is_bgr'] = (~(tmp['n_sessions'] ==5))
         
         recs.append(tmp)
     long = pd.concat(recs, ignore_index=True)
@@ -326,7 +326,7 @@ def _x_for_pair(names, pair_label):
                 x[j] = 1.0
     return x
 
-def _wald_omnibus_pair(res, prefix='C(pair'):
+def _wald_omnibus_pair(res, prefix='C(pair', n_clusters=None):
     names = res.model.exog_names
     idx   = [i for i,n in enumerate(names) if n.startswith(prefix)]
     if not idx:
@@ -334,8 +334,19 @@ def _wald_omnibus_pair(res, prefix='C(pair'):
     L = np.zeros((len(idx), len(names)))
     for r, j in enumerate(idx):
         L[r, j] = 1.0
+    df1 = len(idx)
     w = res.wald_test(L, scalar=True)
-    return float(w.pvalue), float(np.asarray(w.statistic))
+    print("degrees of freedom sanity check ", df1)
+    if res.cov_type == "bias_reduced":
+        return float(w.pvalue), float(np.asarray(w.statistic))
+    else:
+        if n_clusters is None:
+            raise ValueError("n_clusters required for F correction")
+        df2 = max(int(n_clusters) - 1, 1)
+        chi2 = float(np.asarray(w.statistic))
+        Fstat = chi2 / df1
+        p = 1.0 - fdist.cdf(Fstat, df1, df2)
+        return float(p), float(Fstat)
 
 def _pair_prob_ci(names, beta, V, pair_label):
     x = _x_for_pair(names, pair_label)
@@ -383,7 +394,7 @@ def _pair_avgpred_and_grad(res, df, pair_label):
     grad = grad.mean(axis=0)
     return p_bar, grad
 
-def pair_emm_and_grad(res, df, pair_label, mouse_col="mouse", weights=None):
+def pair_emm_and_grad(res, df, pair_label, mouse_col="mouse", weights=None, estimand="cell"):
     """
     EMM on the probability scale for a given pair level, with a delta-method gradient
     that matches the averaging scheme.
@@ -406,6 +417,7 @@ def pair_emm_and_grad(res, df, pair_label, mouse_col="mouse", weights=None):
     p   = 1.0 / (1.0 + np.exp(-eta))
     p = np.asarray(p, dtype=float).reshape(-1)
     print(weights)
+    X_arr = np.asarray(getattr(X, "values", X))
     if weights is not None:
         w = np.asarray(weights, dtype=float).reshape(-1)
         w = w / w.sum()
@@ -415,24 +427,24 @@ def pair_emm_and_grad(res, df, pair_label, mouse_col="mouse", weights=None):
         grad  = (w[:,None] * (p*(1-p))[:,None] * X_arr).sum(axis=0)
         return p_bar, grad
 
-    # mouse-balanced (each mouse contributes equally)
-    X_arr = np.asarray(getattr(X, "values", X))
-    d_ = pd.DataFrame({"mouse": d[mouse_col].values, "p": np.asarray(p)})
-    by_mouse = d_.groupby("mouse")["p"].mean()
-    p_bar = float(by_mouse.mean())
 
-    # For the gradient, apply the same two-step averaging:
-    # 1) within-mouse mean = (1/n_m) sum_i p_i*(1-p_i) x_i
-    # 2) across mice mean  = mean over mice
-    mats = []
-    for m, idx in d.groupby(mouse_col).groups.items():
-        idx = np.asarray(list(idx))
-        Xm  = X_arr[idx, :]
-        pm  = np.asarray(p)[idx]
-        gm  = (pm*(1-pm))[:,None] * Xm
-        mats.append(gm.mean(axis=0))
-    grad = np.vstack(mats).mean(axis=0)
-    return p_bar, grad
+
+    if estimand == "cell":
+        # simple row-average (cell-level estimand)
+        p_bar = float(p.mean())
+        grad  = (((p*(1-p))[:, None]) * X_arr).mean(axis=0)
+        return p_bar, grad
+
+    if estimand == "mouse":
+        # mouse-balanced: within-mouse mean, then mean across mice
+        p_bar = float(d.assign(p=p).groupby(mouse_col)["p"].mean().mean())
+        mats = []
+        for _, sub in d.groupby(mouse_col, sort=False):   # <-- 3)
+            idx = sub.index.to_numpy()
+            gm  = ((p[idx]*(1-p[idx]))[:, None] * X_arr[idx, :]).mean(axis=0)
+            mats.append(gm)
+        grad = np.vstack(mats).mean(axis=0)
+        return p_bar, grad
 
 
 def _LL_vs_avg_stats(res, df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=None, weights = None):
@@ -542,7 +554,7 @@ def sweep_gee_to_csv(
             cluster_min  = int(sizes.min())
             cluster_max  = int(sizes.max())
                         
-            group_p, group_chi = _wald_omnibus_pair(res)
+            group_p, group_chi = _wald_omnibus_pair(res, n_clusters=n_clusters)
 
             names, beta, V = _gee_names_beta_V(res)
 
@@ -687,6 +699,8 @@ def sweep_gee_to_csv(
     # keep any extras too, but order the main ones
     cols = [c for c in ordered_cols if c in out.columns] + [c for c in out.columns if c not in ordered_cols]
     out = out[cols]
+    if weighted:
+        cells_label += "_weighted"
     csv_path = f"/mnt/data/fos_gfp_tmaze/results/gee_transition/{cells_label}.csv"
     out.to_csv(csv_path, index=False)
     return out
@@ -699,7 +713,8 @@ def sweep_gee_to_csv(
 sweep_thresholds([0.5, 0.75, 1, 1.25], classify_transitions, build_long, fit_gees, contrast_fn=None)
 
 #%% main sweeper call
-
+filteredby = "always_active"
+#%%
 thresholds = [0.5, 0.75, 1, 1.25]
 sweep_gee_to_csv(
     thresholds,
@@ -708,11 +723,24 @@ sweep_gee_to_csv(
     fit_gees,                 # function(long_df, cov_type) -> (gee_up, gee_down)
     pairs,                  # list of (before, after, label)
     SESSIONS,               # SESSIONS
-    cells_label="always_active_weighted",
+    cells_label=filteredby,
+    ref_label="landmark1_to_landmark2",
+    map_cols=("s0_landmark1","landmark2_ctx1","ctx1_ctx2"),  # order: s0_l1, l2_c1, c1_c2
+    weighted = False
+)
+sweep_gee_to_csv(
+    thresholds,
+    classify_transitions,
+    build_long,
+    fit_gees,                 # function(long_df, cov_type) -> (gee_up, gee_down)
+    pairs,                  # list of (before, after, label)
+    SESSIONS,               # SESSIONS
+    cells_label=filteredby,
     ref_label="landmark1_to_landmark2",
     map_cols=("s0_landmark1","landmark2_ctx1","ctx1_ctx2"),  # order: s0_l1, l2_c1, c1_c2
     weighted = True
 )
+
 
 
 #%%
@@ -754,36 +782,55 @@ def plot_class_balance(class_counts):
 #%%
 long_nobgr.columns
 
-#%%
+#%% summary plots
 pair_key_map = {
     "s0_landmark1": "s0_l1",
     "landmark1_landmark2": "ref",
     "landmark2_ctx1": "l2_c1",
     "ctx1_ctx2": "c1_c2",
 }
-CSV_PATH = "/mnt/data/fos_gfp_tmaze/results/gee_transition/always_active_weighted.csv"
-summary_df = pd.read_csv(CSV_PATH)
 
-overlay_up = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_up", pair_key_map)
-overlay_down = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_down", pair_key_map)
+
+
+for v in ["", "_weighted"]:
+    CSV_PATH = f"/mnt/data/fos_gfp_tmaze/results/gee_transition/{filteredby}{v}.csv"
+    summary_df = pd.read_csv(CSV_PATH)
+
+    # for cutoff in [0.75,1]:    
+    #     classified_df = classify_transitions(all_mice, pairs, session_ids = SESSIONS, sd_threshold = cutoff, method = 'robust')
+    #     long_nobgr, _ = build_long(classified_df, pairs ,group_cols=(['mouse']), method="robust")
+    #     overlay_up = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_up", pair_key_map)
+    #     overlay_down = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_down", pair_key_map)
+    #     gp.fig_pair_effect_at_cutoff(CSV_PATH, "UP", cutoff, per_mouse_overlay=overlay_up, xlim=(0.02, 0.2))
+    #     gp.fig_pair_effect_at_cutoff(CSV_PATH, "DOWN", cutoff, per_mouse_overlay=overlay_down, xlim=(0.085, 0.2))
+    
+   
+    # fig, axs = plt.subplots(1, 2, figsize=(10, 3.6), sharex=True)  # sharex; y ranges differ
+    # gp.fig_fragility_p_vs_cutoff(CSV_PATH, "DOWN", y_max=1, title="DOWN", ax=axs[0])
+    # gp.fig_fragility_p_vs_cutoff(CSV_PATH, "UP",   y_max=1, title="UP",   ax=axs[1])
+    
+    # fig.suptitle("Wrażliwość modelu na próg odcięcia", fontsize=14, fontweight='bold')
+    # fig.tight_layout()
+    
+    
 #%%
-for cutoff in [1]:    
-    classified_df = classify_transitions(all_mice, pairs, session_ids = SESSIONS, sd_threshold = cutoff, method = 'robust')
-    long_nobgr, _ = build_long(classified_df, pairs ,group_cols=(['mouse']), method="robust")
-    overlay_up = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_up", pair_key_map)
-    overlay_down = gp.build_per_mouse_overlay(long_nobgr, "mouse", "pair", "y_down", pair_key_map)
-    gp.fig_pair_effect_at_cutoff(CSV_PATH, "UP", cutoff, per_mouse_overlay=overlay_up)
-    gp.fig_pair_effect_at_cutoff(CSV_PATH, "DOWN", cutoff, per_mouse_overlay=overlay_down)
+filteredby="active_in_both"
+CSV_PATH = f"/mnt/data/fos_gfp_tmaze/results/gee_transition/{filteredby}{v}.csv"
+gp.plot_emm_vs_cutoff(CSV_PATH, "UP", what_cells=f'{filteredby}',
+                       ref_vlines=(0.75, 1.0), title=None)
+gp.plot_emm_vs_cutoff(CSV_PATH, "DOWN", what_cells=f'{filteredby}',
+                       ref_vlines=(0.75, 1.0), title=None)
+#%%
+gp.plot_p_vs_cutoff_with_counts(
+    CSV_PATH,
+    direction="DOWN",
+    count_cols=("cluster_mean", "cluster_min", "cluster_max")
+)
 
 #%%
-gp.plot_forest_at_cutoff(summary_df, "UP", 0.75, save_path=None, title_suffix="")
-gp.plot_forest_at_cutoff(summary_df, "DOWN", 0.75, save_path=None, title_suffix="")
-#%%
-fig, axs = plt.subplots(1, 2, figsize=(10, 3.6), sharex=True)  # sharex; y ranges differ
-gp.fig_fragility_p_vs_cutoff(CSV_PATH, "DOWN", y_max=1.2, title="DOWN — p vs cutoff", ax=axs[0])
-gp.fig_fragility_p_vs_cutoff(CSV_PATH, "UP",   y_max=1.2, title="UP — p vs cutoff",   ax=axs[1])
 
-fig.tight_layout()
+gp.plot_counts_by_cutoff_per_pair(CSV_PATH, "UP")
+gp.plot_counts_by_cutoff_per_pair(CSV_PATH, "DOWN")
 #%%
 
 def loo_emm(resolver_fit_fn, long_df, pairs, weighted=True):
