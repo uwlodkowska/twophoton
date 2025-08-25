@@ -1,21 +1,24 @@
 experiment:
   name: "ctx_landmark"
-  dir_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/despeckle/"
-  full_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv"
+  dir_path: "/mnt/data/fos_gfp_tmaze/ctx_landmark/despeckle_nc/"
+  full_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark/m{m}r{r}.csv"
   res_dir_path: "alignment_result/"
   path_for_icy: "alignment_result/aligned_despeckle/"
-  optimized_path: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/"
-  background_dir: "/media/ula/DATADRIVE1/fos_gfp_tmaze/results/ctx_landmark/background.csv"
+  result_path: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark/"
+  background_dir: "/mnt/data/fos_gfp_tmaze/results/ctx_landmark/background.csv"
   session_order: [['ctx', 'landmark1', 'landmark2'],['landmark', 'ctx1', 'ctx2']]
-  regions: [[[5,1], [8,1], [10,1], [13,1], [11,2], [14,1], [20,2]], [[1,1], [3,1], [4,1], [6,1], [7,1], [9,1]]]
+  regions: [[[2,2], [5,1], [10,1], [11,1], [13,2],[14,1], [16, 1], [8,1], [20,2]],
+  [[1,2], [3,2],[4,1], [7,2], [9,1],[12,1], [17,1], [18,2]]]
 
 behavior:
   behav_dir: "/media/ula/DATADRIVE1/fos_gfp_tmaze/ctx_landmark/behav/Tmaze_2p_landmark_ctx.xlsx"
 
 filenames:
-  cell_data_fn_template: "m{}r{}_{}_output.txt"
-  img_fn_template: "m{}r{}_{}.tif"
-  watershed_img_fn_template: "m{}r{}_{}_watershed.tif"
+  cell_data_fn_template: "m{}_r{}_{}_output.txt"
+  cell_data_opt_template: "m{}_r{}_{}_output_optimized.txt"
+  img_fn_template: "m{}_r{}_{}.tif"
+  watershed_img_fn_template: "m{}_r{}_{}_watershed.tif"
+  pooled_cells: "m{}_r{}_pooled.csv"
 
 alignment_filenames:
   thresh: "m{}_r{}_{}_spots"
@@ -24,3 +27,5 @@ alignment_filenames:
 constants:
   tolerance: 5
   img_ext: ".tif"
+
+

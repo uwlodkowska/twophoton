@@ -7,7 +7,7 @@ experiment:
   result_path: "/mnt/data/fos_gfp_tmaze/results/multisession_nc/"
   background_dir: "/mnt/data/fos_gfp_tmaze/results/multisession_nc/background.csv"
   session_order: [['s0','landmark1', 'landmark2', 'ctx1', 'ctx2']]
-  regions: [[[6,1]]]
+  regions: [[[1,1], [14,1], [9,2],[8,1], [16,2], [5,2,], [6,1], [7,1], [13,1]]]
 
 
 filenames:
