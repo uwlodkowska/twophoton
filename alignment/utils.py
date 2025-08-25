@@ -7,12 +7,15 @@ Created on Mon Feb 20 17:19:59 2023
 """
 import pandas as pd
 import constants
+from constants import ICY_COLNAMES
 from skimage import io
 import numpy as np
 import math
 import os.path
 import cell_preprocessing as cp
 import ast
+import sys
+import yaml
 
 def read_single_session_cell_data(mouse, region, sessions, config, test=False, optimized=False):
     DIR_PATH = config["experiment"]["dir_path"]
@@ -52,8 +55,8 @@ def read_pooled_cells(mouse, region, config):
 
     return df
 
-def read_pooled_with_background(mouse, region, config):
-    sessions = config["experiment"]["session_order"][0]
+def read_pooled_with_background(mouse, region, config, idx = 0):
+    sessions = config["experiment"]["session_order"][idx]
     df = read_pooled_cells(mouse, region, config)
     
     img = read_image(mouse, region, sessions[0], config)
@@ -172,3 +175,24 @@ def z_scoring_binned(df, session_ids):
         df[f"bgr_norm_{sid}"] = df.groupby("z_bin")[bgr_col].transform(lambda x: (x - x.mean()) / x.std())
 
     return df
+
+def get_concatenated_df_from_config(config_file, idx, suff):
+    
+    with open(config_file, "r") as file:
+        config = yaml.safe_load(file)
+
+    regions = config["experiment"]["regions"][idx]
+    SESSIONS = config["experiment"]["session_order"][idx]
+
+    dfs = []
+    for mouse, region in regions:
+        df_mouse = read_pooled_with_background(mouse, region, config, idx=idx)
+        df_mouse["mouse"] = f'{mouse}{suff}'
+        df_mouse[ICY_COLNAMES['zcol']] = df_mouse[ICY_COLNAMES['zcol']]/df_mouse[ICY_COLNAMES['zcol']].max()
+        df_mouse["cell_id"] = df_mouse.index.map(lambda i: f"{mouse}{suff}_{i}")
+        df_mouse = cp.intensity_depth_detrend(df_mouse, SESSIONS)
+        dfs += [df_mouse]
+    all_mice = pd.concat(dfs)
+    return SESSIONS, all_mice
+    
+    

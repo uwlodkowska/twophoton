@@ -14,7 +14,7 @@ import pandas as pd
 
 #%% config
 
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/ctx_landmark.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
@@ -28,14 +28,15 @@ BGR_DIR = config["experiment"]["background_dir"]
 RESULT_PATH = config["experiment"]["result_path"]
 
 regions = config["experiment"]["regions"]
-group_session_order = config["experiment"]["session_order"][0]
+group_session_order = config["experiment"]["session_order"][1]
 
 optimized_fname = config["filenames"]["cell_data_opt_template"]
 pooled_cells_fname = config["filenames"]["pooled_cells"]
 
 #%% ready regions
 
-regions = [[6,1]]
+regions = [[13,2],[14,1], [16, 1], [8,1], [20,2], [2,2], [5,1], [10,1], [11,1]]
+regions = [[1,2], [3,2],[4,1], [7,2], [9,1],[12,1], [17,1], [18,2]]
 
 #%% reading  and prepping detection results from icy
 
@@ -64,7 +65,7 @@ for mouse, region in regions:
 #%% pooling
 
 #!warning! here tolerance is not in pixels, but um
-for mouse, region in regions[:1]:        
+for mouse, region in regions:        
     df_reseg = its.pool_cells_globally(mouse, region, group_session_order, config, 7)
     for sid in group_session_order:
         img = utils.read_image(mouse, region, sid, config)
@@ -248,7 +249,7 @@ def per_mouse_lspec_cspec_ctrl(dfs, tst_only = False):
         S0 = sub["detected_in_sessions"].apply(lambda s: _contains(s, "s0"))
         if tst_only:
             sub = sub[~S0]
-        
+        sub_tmp = cp.intensity_depth_detrend(sub, group_session_order)
 
         L1 = sub["detected_in_sessions"].apply(lambda s: _contains(s, "landmark1"))
         L2 = sub["detected_in_sessions"].apply(lambda s: _contains(s, "landmark2"))
@@ -260,6 +261,22 @@ def per_mouse_lspec_cspec_ctrl(dfs, tst_only = False):
         Ctrl  = (L2 & C1) & (~L1 & ~C2)
 
         # Proportions
+        
+        print("landmark ",
+              sub_tmp.loc[Lspec]["int_optimized_landmark1_rstd"].mean(),
+              sub_tmp.loc[Lspec]["int_optimized_landmark2_rstd"].mean()
+              )
+        
+        print("ctx ",
+              sub_tmp.loc[Cspec]["int_optimized_ctx1_rstd"].mean(),
+              sub_tmp.loc[Cspec]["int_optimized_ctx2_rstd"].mean()
+              )
+        
+        print("mixed ",
+              sub_tmp.loc[Ctrl]["int_optimized_landmark2_rstd"].mean(),
+              sub_tmp.loc[Ctrl]["int_optimized_ctx1_rstd"].mean()
+              )
+        
         p_Lspec = Lspec.mean()
         p_Cspec = Cspec.mean()
         p_Ctrl  = Ctrl.mean()
@@ -278,6 +295,7 @@ def per_mouse_lspec_cspec_ctrl(dfs, tst_only = False):
 # --- 2) cluster bootstrap over mice ------------------------------------------
 def cluster_bootstrap_lspec_cspec_ctrl(df_cells, B=10000, rng_seed=0, stat="mean", tst_only = False):
     rng = np.random.default_rng(rng_seed)
+    print("full population? ", str((not tst_only)))
     pm = per_mouse_lspec_cspec_ctrl(df_cells, tst_only = tst_only)
     if pm.empty:
         raise ValueError("No eligible data.")
