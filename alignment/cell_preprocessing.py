@@ -412,7 +412,7 @@ def intensity_depth_detrend(
 
         bg_mean = df.groupby(z_bin)[f"background_{sid}"].transform("mean")
         bg_std  = df.groupby(z_bin)[f"background_{sid}"].transform("std")
-        threshold = bg_mean + 6.0 * bg_std
+        threshold = bg_mean + 3.0 * bg_std
         out[f"is_dim_by_bg_{sid}"] = (out[Icol] < threshold)
 
 
