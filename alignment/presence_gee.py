@@ -15,54 +15,35 @@ import pandas as pd
 
 from scipy.special import expit as logistic
 import statsmodels.api as sm
+from scipy import stats
 
-
+import presence_plots as pp
 #%% config
 
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
-
-with open(config_file, "r") as file:
-    config = yaml.safe_load(file)
-
-
-SOURCE_DIR_PATH = config["experiment"]["dir_path"]
-ICY_PATH = SOURCE_DIR_PATH + config["experiment"]["path_for_icy"]
-
-DIR_PATH = config["experiment"]["full_path"]
-BGR_DIR = config["experiment"]["background_dir"]
-RESULT_PATH = config["experiment"]["result_path"]
-
-regions = config["experiment"]["regions"]
-group_session_order = config["experiment"]["session_order"][0]
-
-optimized_fname = config["filenames"]["cell_data_opt_template"]
-pooled_cells_fname = config["filenames"]["pooled_cells"]
-#%%
-regions = [[1,1], [14,1], [9,2],[8,1], [16,2], [5,2,], [6,1], [7,1], [13,1]]
+SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", idx=0)
 
 #%%
-dfs = []
-for mouse, region in regions:
-    dfs += [utils.read_pooled_with_background(mouse, region, config)]
+all_mice.columns
     
 #%%
-pairs = list(zip(group_session_order, group_session_order[1:]))
+pairs = list(zip(SESSIONS, SESSIONS[1:]))
 
 #%%
 group_pct_df, df_counts = cc.gather_group_counts_across_mice(
-    regions,
+    all_mice,
     pairs,
-    config,
-    normalize=False,
-    dfs=dfs,
-    return_counts = True
+    groups=None,                 # default depends on ttype
+    ttype="presence",            # "presence" -> on/off/const; "intensity" -> up/down/stable
+    normalize=True,
+    mouse_col = "mouse",
+    denominator="union",         # "union" (|A∪B|) or "intersection" (|A∩B|) if you ever want that
+    return_counts=True,          # also return a wide counts table ready for GLM
+    canonical = False
 )
 
 #%%
-cols = ["bg_mean", "bg_std", "bg_diff"]  # adjust as needed
-desc = df_turn[cols].agg(["mean","std","min","max"]).T
-print(desc)
-
+print(df_counts.describe())
+print(group_pct_df.columns)
 #%%
 from itertools import combinations
 from scipy.stats import ttest_rel, shapiro
@@ -195,12 +176,32 @@ def rm_anova_one_factor_wide(df_long: pd.DataFrame,
     post = []
     for a, b in pairs:
         diffs = (complete[a] - complete[b]).dropna()
-        if len(diffs) >= 2:
-            t, p = ttest_rel(complete[a], complete[b], nan_policy="omit")
-            dz = diffs.mean() / (diffs.std(ddof=1) + 1e-12)  # Cohen's dz
+        n = len(diffs)
+        if n >= 2:
+            t_stat, p = ttest_rel(complete[a], complete[b], nan_policy="omit")
+            mean_diff = float(diffs.mean())
+            sd = float(diffs.std(ddof=1))
+            se = sd / np.sqrt(n)
+            df_ = n - 1
+            # two-sided 95% CI for the paired mean difference
+            tcrit = stats.t.ppf(0.975, df_)
+            ci_lo = mean_diff - tcrit * se
+            ci_hi = mean_diff + tcrit * se
+            dz = mean_diff / (sd + 1e-12)  # Cohen's dz (paired)
         else:
-            t, p, dz = np.nan, np.nan, np.nan
-        post.append({"contrast": f"{a} - {b}", "t": t, "p_uncorrected": p, "dz": dz, "n": len(diffs)})
+            t_stat = p = dz = mean_diff = ci_lo = ci_hi = np.nan
+            df_ = n - 1 if n > 0 else np.nan
+        post.append({
+            "contrast": f"{a} - {b}",
+            "n": n,
+            "df": df_,
+            "mean_diff": mean_diff,
+            "ci95_lo": ci_lo,
+            "ci95_hi": ci_hi,
+            "t": t_stat,
+            "p_uncorrected": p,
+            "dz": dz
+        })
     post = pd.DataFrame(post)
     if not post.empty:
         post["p_holm"] = multipletests(post["p_uncorrected"], method="holm")[1]
@@ -216,7 +217,7 @@ def rm_anova_one_factor_wide(df_long: pd.DataFrame,
         norm_rows.append({"contrast": f"{a} - {b}", "shapiro_W": W, "shapiro_p": pW, "n": len(diffs)})
     normality = pd.DataFrame(norm_rows)
 
-    return {
+    return complete, {
         "anova_table_uncorrected": anova_table,
         "sphericity": spher,                 # Mauchly W, chi2, df, p
         "gg_correction": gg_correction,      # epsilon, corrected dfs, corrected p
@@ -236,20 +237,20 @@ def rm_anova_one_factor_wide(df_long: pd.DataFrame,
 def run_two_anovas(df_counts: pd.DataFrame):
     tidy = build_stability_direction_table(df_counts)
     tidy = tidy.rename(columns={"mouse_id": "mouse", "Pair": "transition"})  # align names
-
+    print(tidy.head(10))
     # ANOVA #1: Stability across transitions
-    res_stability = rm_anova_one_factor_wide(tidy, dv="prop_const",
+    complete, res_stability = rm_anova_one_factor_wide(tidy, dv="prop_const",
                                              mouse_col="mouse", within_col="transition")
 
     # ANOVA #2: Direction across transitions
-    res_direction = rm_anova_one_factor_wide(tidy, dv="prop_on_given_change",
+    _, res_direction = rm_anova_one_factor_wide(tidy, dv="prop_on_given_change",
                                              mouse_col="mouse", within_col="transition")
 
 
 
 
 
-    return res_stability, res_direction
+    return complete, res_stability, res_direction
 
 from scipy.stats import chi2
 
@@ -346,7 +347,7 @@ def apply_epsilon_correction(F_value: float, df1: float, df2: float, eps: float)
 
 #%%
 
-res_stability, res_direction = run_two_anovas(df_counts)
+complete, res_stability, res_direction = run_two_anovas(df_counts)
 
 # Inspect
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
@@ -375,141 +376,59 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
 
 
 #%%
+from scipy import stats
+import numpy as np
+import pandas as pd
 
-
-from scipy.stats import ttest_rel, shapiro, wilcoxon, norm, t as t_dist
-
-
-# --- Helper: pick AABB mice and compute outcomes ---
-def make_aabb_outcomes(df,
-                       mouse_col="mouse_id", pair_col="Pair",
-                       on="on", off="off", const="const", n_col="n"):
-    # Keep mice that have AABB transitions (with S0->landmark1)
-    pairs_needed = {"s0_to_landmark1", "landmark1_to_landmark2", "landmark2_to_ctx1", "ctx1_to_ctx2"}
-    has_all = df.groupby(mouse_col)[pair_col].transform(lambda s: pairs_needed.issubset(set(s)))
-    d = df[has_all].copy()
-
-    # Outcomes
-    d["prop_const"] = d[const] / d[n_col]
-    denom = d[on] + d[off]
-    d["prop_on_given_change"] = np.where(denom > 0, d[on] / denom, np.nan)
-
-    return d
-
-# --- Helper: wide mouse×transition table for a DV ---
-def wide_by_pair(d, dv, mouse_col="mouse_id", pair_col="Pair"):
-    keep = [mouse_col, pair_col, dv]
-    ww = d[keep].pivot_table(index=mouse_col, columns=pair_col, values=dv, aggfunc="mean")
-    return ww
-
-# Planned contrasts (AABB mapping)
-# Baseline vs First test: s0_to_landmark1 (Baseline) vs landmark1_to_landmark2 (LL)
-# The other three among LL, LC, CC
-CONTRASTS = [
-    ("s0_to_landmark1",       "landmark1_to_landmark2", "ttest"),  # Baseline vs First test (non-normal)
-    ("landmark1_to_landmark2","landmark2_to_ctx1",      "ttest"),     # LL vs LC (primary)
-    ("landmark1_to_landmark2","ctx1_to_ctx2",           "ttest"),     # LL vs CC
-#    ("landmark2_to_ctx1",     "ctx1_to_ctx2",           "ttest"),     # LC vs CC
-]
-
-def paired_t_with_ci(x, y):
-    # x,y are aligned arrays (no NaNs), len>=2
-    diffs = x - y
+def quick_paired_diagnostics(complete_wide: pd.DataFrame, a: str, b: str):
+    diffs = (complete_wide[a] - complete_wide[b]).dropna()
     n = len(diffs)
-    m = diffs.mean()
-    sd = diffs.std(ddof=1) if n>1 else np.nan
-    t_stat, p = ttest_rel(x, y, nan_policy="omit")
-    dz = m / (sd + 1e-12)  # Cohen's dz for paired
-    # 95% CI for mean difference
-    se = sd / np.sqrt(n) if n>1 else np.nan
-    tcrit = t_dist.ppf(0.975, df=n-1) if n>1 else np.nan
-    ci_lo = m - tcrit*se if n>1 else np.nan
-    ci_hi = m + tcrit*se if n>1 else np.nan
-    return dict(n=n, mean_diff=m, t=t_stat, p=p, dz=dz, ci_lo=ci_lo, ci_hi=ci_hi)
+    out = {"contrast": f"{a}-{b}", "n": n}
+    if n < 2: return out, None, None
 
-def wilcoxon_with_effect(x, y):
-    # Wilcoxon signed-rank; effect size as rank-biserial r
-    diffs = x - y
-    diffs_nonzero = diffs[diffs != 0]
-    n = len(diffs_nonzero)
-    if n < 1:
-        return dict(n=len(diffs), W=np.nan, p=np.nan, r_rb=np.nan,
-                    hl=np.nan, ci_lo=np.nan, ci_hi=np.nan)
-    W_stat, p = wilcoxon(diffs_nonzero)  # two-sided
-    # Approximate z from p (two-sided), keep sign from median diff
-    z_abs = norm.isf(p/2) if p>0 else np.inf
-    sign = np.sign(np.median(diffs_nonzero)) if np.isfinite(z_abs) else 0.0
-    z = sign * z_abs
-    r_rb = z / np.sqrt(n)  # rank-biserial approximation
-    # Hodges–Lehmann estimator (median of pairwise differences) ~ median(diffs)
-    hl = np.median(diffs)
-    # Simple bootstrap CI for HL (percentile)
-    rng = np.random.default_rng(12345)
-    B = 5000
-    if n >= 3:
-        boots = []
-        idx = np.arange(len(diffs))
-        for _ in range(B):
-            bidx = rng.choice(idx, size=len(idx), replace=True)
-            boots.append(np.median(diffs[bidx]))
-        ci_lo, ci_hi = np.percentile(boots, [2.5, 97.5])
-    else:
-        ci_lo = ci_hi = np.nan
-    return dict(n=len(diffs), W=W_stat, p=p, r_rb=r_rb, hl=hl, ci_lo=ci_lo, ci_hi=ci_hi)
+    # t + dz
+    t_stat, p_t = stats.ttest_1samp(diffs, 0.0)
+    mean_diff = diffs.mean()
+    sd_diff   = diffs.std(ddof=1)
+    dz        = mean_diff / sd_diff if sd_diff > 0 else np.nan
 
-def run_planned_contrasts_S0AABB(df, dv):
-    d = make_aabb_outcomes(df)
-    W = wide_by_pair(d, dv)
+    # Wilcoxon + HL median
+    try:
+        w_stat, p_wil = stats.wilcoxon(diffs, zero_method="wilcox", method="auto")
+    except Exception:
+        w_stat, p_wil = (np.nan, np.nan)
+    hl = float(np.median(diffs))
 
-    rows = []
-    for a, b, method in CONTRASTS:
-        # Keep mice that have both
-        sub = W[[a, b]].dropna()
-        if sub.empty or len(sub) < 2:
-            rows.append({"contrast": f"{a} - {b}", "n": len(sub), "method": method,
-                         "p_raw": np.nan})
-            continue
-        x, y = sub[a].to_numpy(), sub[b].to_numpy()
+    # robust z via MAD
+    mad = stats.median_abs_deviation(diffs, scale='normal', nan_policy='omit')
+    z_robust = (diffs - hl) / (mad if mad > 0 else np.nan)
+    flags = pd.DataFrame({"mouse": diffs.index, "diff": diffs.values, "z_robust": z_robust.values}) \
+               .assign(outlier=lambda d: d["z_robust"].abs() > 3)
 
-        # Normality check (useful to log)
-        try:
-            Wsh, Psh = shapiro(x - y) if len(sub) >= 3 else (np.nan, np.nan)
-        except Exception:
-            Wsh, Psh = (np.nan, np.nan)
+    # leave-one-out t-test
+    loo = []
+    for m in diffs.index:
+        dsub = diffs.drop(m)
+        if len(dsub) >= 2:
+            t_i, p_i = stats.ttest_1samp(dsub, 0.0)
+            loo.append({"mouse": m, "mean_wo": dsub.mean(), "t_wo": t_i, "p_wo": p_i})
+    loo = pd.DataFrame(loo).sort_values("p_wo") if loo else None
 
-        if method == "ttest":
-            res = paired_t_with_ci(x, y)
-            rows.append({
-                "contrast": f"{a} - {b}", "n": res["n"], "method": "paired_t",
-                "mean_diff": res["mean_diff"], "ci_lo": res["ci_lo"], "ci_hi": res["ci_hi"],
-                "t": res["t"], "dz": res["dz"], "p_raw": res["p"], "shapiro_W": Wsh, "shapiro_p": Psh
-            })
-        else:  # wilcoxon
-            res = wilcoxon_with_effect(x, y)
-            rows.append({
-                "contrast": f"{a} - {b}", "n": res["n"], "method": "wilcoxon",
-                "median_diff": res["hl"], "ci_lo": res["ci_lo"], "ci_hi": res["ci_hi"],
-                "W": res["W"], "r_rb": res["r_rb"], "p_raw": res["p"], "shapiro_W": Wsh, "shapiro_p": Psh
-            })
+    out.update({
+        "mean_diff": float(mean_diff), "sd_diff": float(sd_diff), "dz": float(dz),
+        "t": float(t_stat), "p_t": float(p_t),
+        "median_diff": hl, "wilcoxon_W": float(w_stat), "p_wilcoxon": float(p_wil),
+        "max_|z_robust|": float(np.nanmax(np.abs(z_robust))) if np.size(z_robust)>0 else np.nan,
+        "any_robust_outlier": bool(flags["outlier"].any())
+    })
+    return out, loo, flags
 
-    out = pd.DataFrame(rows)
 
-    # Holm correction across the FOUR planned contrasts
-    if out["p_raw"].notna().any():
-        out["p_holm"] = np.nan
-        mask = out["p_raw"].notna()
-        out.loc[mask, "p_holm"] = multipletests(out.loc[mask, "p_raw"], method="holm")[1]
-
-    return out.sort_values("contrast").reset_index(drop=True)
 #%%
-# ---- Example usage ----
-
-# Stability:
-tab_stab = run_planned_contrasts_S0AABB(df_counts, dv="prop_const")                # const/n already computed inside
-# # Direction:
-tab_dir  = run_planned_contrasts_S0AABB(df_counts, dv="prop_on_given_change")      # on/(on+off)
-# print(tab_stab); print(tab_dir)
-
+summary, loo, flags = quick_paired_diagnostics(complete, "ctx1_to_ctx2", "landmark_to_ctx1")
+print(summary)
+print("\nLOO (lowest p without each mouse):\n", loo)
+print("\nRobust outliers (|z_robust|>3):\n", flags[flags.outlier])
 #%%
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
     print(tab_dir)
@@ -626,8 +545,9 @@ df_turn["prop_const"] = df_turn["const"] / df_turn["n"]
 
 # Choose a reference level explicitly (edit to your preferred ref)
 ref = "landmark1_to_landmark2"
+ref = "ctx1_to_ctx2"
 # Build numeric y and X:
-y, X = pt.dmatrices(f"prop_changed ~ C(Pair, Treatment(reference='{ref}'))",
+y, X = pt.dmatrices(f"prop_const ~ C(Pair, Treatment(reference='{ref}'))",
                     data=df_turn, return_type="dataframe")
 # Drop any remaining NaNs just in case
 mask = ~(y.isna().any(axis=1) | X.isna().any(axis=1))
@@ -638,12 +558,12 @@ groups = df_turn.loc[ix, "Mouse"].astype(str)
 w      = df_turn.loc[ix, "n"].astype(float)
 
 gee_turn = GEE(y, X, groups=groups, family=Binomial(),
-               cov_struct=Exchangeable()).fit(scale="X2")
+               cov_struct=Exchangeable()).fit(scale=1.0)
 
 print(gee_turn.summary())
+print("QIC ", gee_turn.qic(scale=1.0))
 
-w
-gee_results_inspection(gee_turn, ref="landmark1_to_landmark2")
+#gee_results_inspection(gee_turn, ref="ref")
 #%%
 ORDER_AABB = {
     "s0_to_landmark1": 0,
@@ -738,7 +658,7 @@ d0 = add_time_ix(df_turn, mouse_col="Mouse", pair_col="Pair")
 d1 = make_prop_df(d0, dv="prop_const").dropna(subset=["prop", "time_ix"]).copy()
 
 
-rhs = "C(Pair, Treatment(reference='landmark1_to_landmark2'))"
+rhs = f"C(Pair, Treatment(reference='{ref}'))"
 X_df = pt.dmatrix("1 + " + rhs, data=d1, return_type="dataframe")
 
 # 3) Convert EVERYTHING passed to GEE into NumPy arrays (1D for y/groups/time)
@@ -756,8 +676,8 @@ for cov_struct in covs:
               cov_type="bias_reduced", scale=1.0
           )
     print(res.summary())
-    gee_results_inspection(res, ref="landmark1_to_landmark2", cov_profile=mean_profile)
-    
+    #gee_results_inspection(res, ref="landmark1_to_landmark2", cov_profile=mean_profile)
+    print("QIC ", gee_turn.qic(scale=1))
 m_std = res.get_margeff(at='overall', method='dydx')
 print(m_std.summary()) 
 #%%
@@ -882,31 +802,29 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
     print(contr)
 
 
-#%%
-gee_cov.summary()
-
-
-
-
 
 
 
 #%% covariate influence inspectino
-f1 = "prop_const ~ C(Pair, Treatment(reference='landmark1_to_landmark2'))"
+f1 = f"prop_const ~ C(Pair, Treatment(reference='{ref}'))"
 y1, X1 = pt.dmatrices(f1, data=df_turn, return_type="dataframe")
 gee_turn = GEE(y1, X1, groups=groups, family=Binomial(),
-                  cov_struct=Exchangeable()).fit(scale=1, cov_type="bias_reduced")
-
-no_cov_qic = gee_turn.qic(scale=1)
+                  cov_struct=Exchangeable()).fit(scale=1.0, cov_type="bias_reduced")
 
 
-f1 = "prop_const ~ C(Pair, Treatment(reference='landmark1_to_landmark2')) + bg_mean+ bg_std+ bg_diff"
+print(gee_turn.summary())
+
+f1 = f"prop_const ~ C(Pair, Treatment(reference='{ref}')) + bg_mean+ bg_std+ bg_diff"
 y1, X1 = pt.dmatrices(f1, data=df_turn, return_type="dataframe")
 gee_cov = GEE(y1, X1, groups=groups, family=Binomial(),
-                  cov_struct=Exchangeable()).fit(scale=1, cov_type="bias_reduced")
-qic_full = gee_cov.qic(scale=1)
+                  cov_struct=Exchangeable()).fit(scale=1.0, cov_type="bias_reduced")
 
-print(no_cov_qic, qic_full)
+print(gee_cov.summary())
+
+print(gee_turn.qic(scale=1.0), gee_cov.qic(scale=1.0))
+#%%
+
+
 #%%
 # Without bg_diff
 w=None
@@ -1002,7 +920,7 @@ mean_profile = {
 
 
 
-y, X = pt.dmatrices("prop_on ~ C(Pair, Treatment(reference='landmark1_to_landmark2')) + bg_mean",
+y, X = pt.dmatrices(f"prop_on ~ C(Pair, Treatment(reference='{ref}'))",
                     data=changed, return_type="dataframe")
 # Drop any remaining NaNs just in case
 mask = ~(y.isna().any(axis=1) | X.isna().any(axis=1))
@@ -1015,10 +933,11 @@ w      = changed.loc[ix, "changed"].astype(float)
 
 
 gee_dir = GEE(y, X, groups=groups, family=Binomial(), cov_struct=Exchangeable(),
-               weights=w).fit(scale="X2")
-print(gee_dir.summary())
+               weights=w).fit(scale=1)
+print(gee_dir.summary() )
+print(gee_dir.scale)
 
-gee_results_inspection(gee_dir, ref="landmark1_to_landmark2", cov_profile=mean_profile)
+#gee_results_inspection(gee_dir, ref="landmark1_to_landmark2", cov_profile=mean_profile)
 
 
 
@@ -1138,7 +1057,6 @@ print(sorted(loo, key=lambda x: x[1]))
 
 
 #%%
-
 
 #%% plotting
 
@@ -1325,3 +1243,47 @@ legend_elems = [
 ax.legend(handles=legend_elems, loc="upper right")
 
 plt.show()
+#%%
+rename_map = {
+    "ctx_to_landmark1": "C→L",
+    "landmark1_to_landmark2": "L→L"
+}
+
+
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
+plt.suptitle("Proporcje komórek")
+pp.presence_boxplot_grouped(
+    df_counts,
+    mouse_col="mouse_id",
+    pair_col="Pair",               
+    on_col="on", off_col="off", const_col="const", n_col="n",
+    classes_order=("on","off","const"),   
+    title="Proporcje komórek - grupa CLL",
+    rename_map = rename_map,
+    ax_=axes[0]
+)
+
+rename_map = {
+    "landmark_to_ctx1": "L→C",
+    "ctx1_to_ctx2": "C→C"
+}
+
+
+pp.presence_boxplot_grouped(
+    df_counts_lc,
+    mouse_col="mouse_id",
+    pair_col="Pair",               
+    on_col="on", off_col="off", const_col="const", n_col="n",
+    classes_order=("on","off","const"),   
+    title="Proporcje komórek - grupa CLL",
+    rename_map = rename_map,
+    ax_=None#axes[1]
+)
+
+
+#axes[0].set_title("Granular RSC")
+
+#plt.tight_layout()
+
+

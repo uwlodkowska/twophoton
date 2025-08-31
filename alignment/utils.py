@@ -176,7 +176,7 @@ def z_scoring_binned(df, session_ids):
 
     return df
 
-def get_concatenated_df_from_config(config_file, idx, suff):
+def get_concatenated_df_from_config(config_file, idx=0, suff=""):
     
     with open(config_file, "r") as file:
         config = yaml.safe_load(file)
@@ -188,11 +188,43 @@ def get_concatenated_df_from_config(config_file, idx, suff):
     for mouse, region in regions:
         df_mouse = read_pooled_with_background(mouse, region, config, idx=idx)
         df_mouse["mouse"] = f'{mouse}{suff}'
-        df_mouse[ICY_COLNAMES['zcol']] = df_mouse[ICY_COLNAMES['zcol']]/df_mouse[ICY_COLNAMES['zcol']].max()
-        df_mouse["cell_id"] = df_mouse.index.map(lambda i: f"{mouse}{suff}_{i}")
         df_mouse = cp.intensity_depth_detrend(df_mouse, SESSIONS)
+        df_mouse[ICY_COLNAMES['zcol']] = df_mouse[ICY_COLNAMES['zcol']]/df_mouse[ICY_COLNAMES['zcol']].max()
+        df_mouse = df_mouse.rename(columns={ICY_COLNAMES['zcol']: "zcol"})
+        df_mouse["cell_id"] = df_mouse.index.map(lambda i: f"{mouse}{suff}_{i}")
         dfs += [df_mouse]
     all_mice = pd.concat(dfs)
+    print(all_mice.columns)
     return SESSIONS, all_mice
     
-    
+def identity_from_session(s: str) -> str:
+    s = str(s).lower()
+    if s.startswith("landmark"): return "landmark"   # L
+    if s.startswith("ctx"):      return "ctx"        # C
+    if s in {"s0","baseline","pre"}: return "s0"     # optional, if you keep S0
+    return s  # fallback (won't match, but keeps original)
+
+def canonical_pair(id1: str, id2: str) -> str:
+    a = identity_from_session(id1)
+    b = identity_from_session(id2)
+    return f"{a}_to_{b}" 
+
+
+def canonical_from_pair_label(lbl: str) -> str:
+    if "_to_" not in lbl:
+        return lbl
+    a, b = lbl.split("_to_", 1)
+    return f"{identity_from_session(a)}_to_{identity_from_session(b)}"
+
+def ensure_pair_canonical(long_df: pd.DataFrame, canonical: bool) -> pd.DataFrame:
+    if not canonical:
+        return long_df
+    if "pair" not in long_df.columns:
+        raise ValueError("long_df must contain a 'pair' column to enable canonical mapping.")
+    d = long_df.copy()
+    d["pair"] = d["pair"].astype(str).apply(canonical_from_pair_label)
+    return d
+
+def slug_for_cols(label: str) -> str:
+    # safe column-friendly key
+    return "pair_" + label.replace("->","_to_").replace(" ", "_").lower()
