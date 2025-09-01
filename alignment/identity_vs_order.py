@@ -127,7 +127,8 @@ def fit_presence_triplet_gee_no_alias(d, include_intensity=False):
     base = d.copy()
 
     # carryover: L vs not-L (S0 and C both 0)
-    base["prev_was_L"] = (base["PrevID"] == "L").astype(int)
+    base["prev_was_same"] = ((base["PrevID"].isin(["L","C"])) &
+                         (base["PrevID"] == base["CurrID"])).astype(int)
 
     # pin categories for stable design
     base["Period"] = pd.Categorical(base["Period"], categories=[0,1,2], ordered=True)
@@ -137,7 +138,7 @@ def fit_presence_triplet_gee_no_alias(d, include_intensity=False):
     groups = base["mouse"].astype(str)
 
     # model: order + current identity + carryover (L vs not-L) + prior state
-    f = "active ~ C(Period) + C(CurrID) + prev_was_L + prev_active"
+    f = "active ~ C(Period) + C(CurrID) + prev_was_same + prev_active"
     if include_intensity and "int_z" in base.columns:
         base["cell_gid"] = base["mouse"].astype(str) + ":" + base["cell_id"].astype(str)
         base["int_z_c"] = base["int_z"] - base.groupby("cell_gid")["int_z"].transform("mean")
@@ -151,18 +152,18 @@ def fit_presence_triplet_gee_no_alias(d, include_intensity=False):
     names = X.columns.tolist()
     idx_order = [i for i,n in enumerate(names) if n.startswith("C(Period")]
     idx_curr  = [i for i,n in enumerate(names) if n.startswith("C(CurrID")]
-    idx_prevL = [names.index("prev_was_L")] if "prev_was_L" in names else []
+    idx_prev_same = [names.index("prev_was_same")] if "prev_was_same" in names else []
     L_order   = np.eye(len(names))[idx_order]
     L_curr    = np.eye(len(names))[idx_curr]
-    L_prevL   = np.eye(len(names))[idx_prevL] if idx_prevL else None
+    L_prev_same   = np.eye(len(names))[idx_prev_same] if idx_prev_same else None
 
     out = {
         "gee": gee,
         "wald_order": gee.wald_test(L_order, use_f=False),
         "wald_identity": gee.wald_test(L_curr,  use_f=False),
     }
-    if L_prevL is not None:
-        out["wald_carryover_L"] = gee.wald_test(L_prevL, use_f=False)
+    if L_prev_same is not None:
+        out["wald_carryover_same"] = gee.wald_test(L_prev_same, use_f=False)
     return out
 
 
@@ -185,5 +186,109 @@ for k, v in gee_res.items():
     if k != "gee":
         print(k, v , "\n")
 
+#%% results translated
+from gee_utils import (emm_period_currid_tables, wald_for_prefixes,
+                       per_mouse_equalizing_weights)
+
+# 0) prepare data (what you already have)
+base = mega_df.copy()
+base["prev_was_L"] = (base["PrevID"] == "L").astype(int)
+base["Period"] = pd.Categorical(base["Period"], categories=[0,1,2], ordered=True)
+base["CurrID"] = pd.Categorical(base["CurrID"], categories=["C","L"])
+
+# 1) formula
+f = "1 + C(Period) + C(CurrID) + prev_was_L + prev_active"
+
+# 2) fit GEE (optionally equalize mice)
+w = None#per_mouse_equalizing_weights(base, mouse_col="mouse")  # or None
+RHS = "C(Period) + C(CurrID) + prev_was_L + prev_active"   # intercept is implicit
+y, X = pt.dmatrices("active ~ " + RHS, data=base, return_type="dataframe")
+gee = GEE(y.values.ravel(), X, groups=base["mouse"].astype(str),
+          family=Binomial(), cov_struct=Exchangeable(),
+          weights=w  # or omit to use unweighted
+         ).fit(scale="X2")
+
+print(gee.summary())
+
+# 3) joint Walds (order, identity, carryover)
+wald_order    = wald_for_prefixes(gee, ("C(Period",))
+wald_identity = wald_for_prefixes(gee, ("C(CurrID",))
+wald_carry    = wald_for_prefixes(gee, ("prev_was_L",))  # single-term test
+print("Order:", wald_order)
+print("Identity:", wald_identity)
+print("Carryover L:", wald_carry)
+
+# 4) EMM tables (mouse-balanced means with delta-method CIs)
+tab_period, tab_curr = emm_period_currid_tables(gee, base, f,
+                                                averaging="mouse",
+                                                mouse_col="mouse",
+                                                weights=w)
+print(tab_period)  # P0,P1,P2 probs + CI + delta_vs_ref (P0)
+print(tab_curr)    # C,L probs + CI + delta_vs_ref (C)
 #%%
-mega_df.Period
+from gee_utils import emm_table_for_factor
+f = "1 + C(Period) + C(CurrID) + prev_was_L + prev_active"
+tab_p0 = emm_table_for_factor(
+    gee, base.assign(prev_active=0), f,
+    factor="Period", levels=[0,1,2], ref=0,
+    averaging="mouse", mouse_col="mouse"
+)
+print(tab_p0)  # shows the ~10 pp drop cleanly
+
+#%%
+names = gee.model.exog_names
+i1 = names.index("C(Period)[T.1]") if "C(Period)[T.1]" in names else names.index("C(Period, levels=[0, 1, 2])[T.1]")
+i2 = names.index("C(Period)[T.2]") if "C(Period)[T.2]" in names else names.index("C(Period, levels=[0, 1, 2])[T.2]")
+import numpy as np
+R = np.zeros((1, len(names))); R[0, i2] = 1; R[0, i1] = -1
+print("P2 vs P1:", gee.wald_test(R, use_f=False))
+sub = base[(base["prev_active"]==0)].copy()
+# keep Period 0/1/2; fit the same model (omit prev_active since it’s 0)
+RHS = "C(Period) + C(CurrID) + prev_was_L"
+y, X = pt.dmatrices("active ~ " + RHS, data=sub, return_type="dataframe")
+gee_sub = GEE(y.values.ravel(), X, groups=sub["mouse"].astype(str),
+              family=Binomial(), cov_struct=Exchangeable()).fit(scale="X2")
+print(gee_sub.summary())
+#%%
+
+import numpy as np, pandas as pd
+from scipy.special import expit
+import matplotlib.pyplot as plt
+
+# names, params, cov from your fitted GEE
+names  = gee.model.exog_names
+beta   = pd.Series(gee.params, index=names)
+V      = pd.DataFrame(gee.cov_params(), index=names, columns=names)
+
+# helper to get eta,se and p,CI for a given row
+def pred_row(**vals):
+    x = pd.Series(0.0, index=names); x["Intercept"]=1.0
+    for k,v in vals.items():
+        if k in names: x[k]=v
+    eta = float(x @ beta)
+    se  = float(np.sqrt(x @ V @ x))
+    p   = expit(eta)
+    lo, hi = expit(eta - 1.96*se), expit(eta + 1.96*se)
+    return p, lo, hi
+
+# build rows for P0,P1,P2 at Curr=C, prev_was_L=0, prev_active=0
+rows = []
+base = {"Intercept":1.0}
+p0,lo0,hi0 = pred_row()
+p1,lo1,hi1 = pred_row(**{"C(Period)[T.1]":1})
+p2,lo2,hi2 = pred_row(**{"C(Period)[T.2]":1})
+rows = pd.DataFrame({
+    "Period":["P0","P1","P2"],
+    "p":[p0,p1,p2],
+    "lo":[lo0,lo1,lo2],
+    "hi":[hi0,hi1,hi2],
+})
+# plot
+fig, ax = plt.subplots(figsize=(4,3))
+ax.bar(rows["Period"], rows["p"], width=0.6)
+ax.vlines(rows["Period"], rows["lo"], rows["hi"])
+for i,r in rows.iterrows():
+    ax.text(i, r["p"]+0.02, f"{r['p']:.2f}", ha="center", va="bottom")
+ax.set_ylim(0,1); ax.set_ylabel("Pr(presence)")
+ax.set_title("Presence probability by period (GEE)")
+plt.tight_layout(); plt.show()

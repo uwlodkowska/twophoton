@@ -19,6 +19,7 @@ from scipy import stats
 
 import presence_plots as pp
 import gee_utils as gu
+
 #%% config
 
 #SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", suff= "_cll", idx=0)
@@ -28,6 +29,8 @@ SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/multise
 id_pairs = list(zip(SESSIONS, SESSIONS[1:]))#[1:3]
 #%%
 all_mice = cc.on_off_cells(all_mice, id_pairs)
+#%%
+all_mice.columns
 
 #%%
 
@@ -232,29 +235,31 @@ def fit_gees(long_nobgr, cov_struct=sm.cov_struct.Independence(), cov_type="robu
 #%%
 ref = "landmark1_to_landmark2"
 ref = "ctx1_to_ctx2"
+#ref = "s0_to_landmark1"
 
-formula = f'1 + C(pair, Treatment(reference="{ref}")) + snr'
+formula = f'1 + C(pair, Treatment(reference="{ref}")) + C(mouse)+ snr'
 weights, res = fit_gees(long_mice, weighted = True, ref = ref, cov_struct=Independence(), formula=formula)
 
 print(res.summary())
 
 
+
 #%%
 
 emms = gu.pair_estimands(
-    res, long_mice, formula, PAIR_LEVELS, ref_label=ref,
+    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
     averaging="mouse", set_fixed={"snr": 0}  
 )
 
 # 2) Contrasts vs reference (Holm-adjusted), with Cohen’s dz
 contr = gu.contrasts_vs_reference(
-    res, long_mice, formula, PAIR_LEVELS, ref_label=ref,
+    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
     averaging="mouse", set_fixed={"snr": 0}
 )
 
-# 3) Omnibus Wald on probability scale (delta method, small-sample F)
+#3) Omnibus Wald on probability scale (delta method, small-sample F)
 omni = gu.wald_omnibus_pair_delta(
-    res, long_mice, formula, PAIR_LEVELS, ref_label=ref,
+    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
     averaging="mouse", set_fixed={"snr": 0},
     n_clusters=long_mice["mouse"].nunique()
 )
@@ -267,12 +272,12 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
 fit_callable = lambda d: fit_gees(
     d, cov_struct=sm.cov_struct.Independence(),formula=formula, cov_type="robust", weighted=True, ref=ref
 )
-
+tst_ref = "ctx1_to_ctx2"
 # 1) LOSO influence on the biological contrast (ctx→l1 vs l1→l2)
 tab, summ = gu.loso_contrast_table(
     fit_callable, long_mice, formula,
     pair_alt="landmark1_to_landmark2", pair_ref=ref,
-    averaging="mouse", set_fixed={"snr": 0}   
+    averaging="mouse",weights=weights, set_fixed={"snr": 0}   
 )
 #%%
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
@@ -280,6 +285,35 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
     print(summ)           # jackknife SE/CI and DFBETA threshold (2/sqrt(m))
     
     # 2) Per-mouse raw (unmodeled) contrast, to sanity-check the same outlier
-    raw = gu.per_mouse_raw_contrast(long_mice, "ctx_to_landmark1", "landmark1_to_landmark2",
+    raw = gu.per_mouse_raw_contrast(long_mice, tst_ref, "landmark1_to_landmark2",
                                     resp_col="y_const", pair_col="pair", mouse_col="mouse")
     print(raw.sort_values("diff"))
+#%%
+fit_callable = lambda d: fit_gees(
+    d,
+    cov_struct=sm.cov_struct.Independence(),
+    formula=formula,
+    cov_type="bias_reduced",   # or "robust"
+    weighted=True,
+    ref="landmark1_to_landmark2"
+)
+
+out = gu.contrast_same_mice_refit_fixed(
+    fit_callable,
+    long_mice,
+    formula,
+    pair_alt="landmark1_to_landmark2",
+    pair_ref="landmark2_to_ctx1",
+    set_fixed={"snr": 0},      # <- fixed covariates here
+    mouse_col="mouse",
+)
+
+out = gu.add_significance_to_contrast(out, alpha=0.05, small_sample=True)
+print({
+    "n_mice": out["n_mice"],
+    "diff": out["diff"],
+    "se": out["se"],
+    "t(df)": (out["stat"], out["df"]),
+    "p_t": out["p_t"],
+    "ci95_t": out["ci95_t"],
+})

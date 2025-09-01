@@ -1,9 +1,5 @@
-import sys
-import yaml
-
 # custom modules
-import cell_classification as cc
-import cell_preprocessing as cp
+
 import utils
 import numpy as np, patsy as pt
 import matplotlib.pyplot as plt
@@ -25,18 +21,19 @@ from constants import ICY_COLNAMES
 import statsmodels.api as sm
 import gee_plotting as gp
 from scipy.stats import f as fdist
+
+import gee_utils as gu
+import up_down_utils as gemm
+
 #%% config
 
-SESSIONS, cll = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", suff= "_cll")
-SESSIONS, lcc = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", idx = 1, suff= "_lcc")
+SESSIONS_cll, cll = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", suff= "_cll")
+SESSIONS_lcc, lcc = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", idx = 1, suff= "_lcc")
 #%%
 all_mice = lcc#pd.concat([cll,lcc])
-#%% df building helpers
-
-
+#%% pairs
+SESSIONS = SESSIONS_lcc
 pairs = list(zip(SESSIONS, SESSIONS[1:]))
-
-
 
 
 #%%
@@ -92,7 +89,7 @@ classified_df = classify_transitions(all_mice, pairs, session_ids = SESSIONS, sd
 #%%
 classified_df.columns
     
-#%%
+#%%long df builder
 
 import patsy as pt
 from statsmodels.genmod.generalized_estimating_equations import GEE
@@ -101,39 +98,53 @@ from statsmodels.genmod.cov_struct import Exchangeable
 
 def build_long(df, 
                id_pairs, 
-               depth_col=ICY_COLNAMES['zcol'], 
+               depth_col='zcol', 
                group_cols=('mouse','cell_id'), 
-               method = "robust", canonical=False):
+               method = "robust", canonical=False, exclude=None):
     recs = []
     
     suff = "_rstd"
     if method == 'raw':
         suff = ""
+
+    session_ids = sorted({sid for (id1,id2) in id_pairs for sid in (id1,id2)})
+    for sid in session_ids:
+        raw = f"snr_robust_{sid}"
+        log = f"snr_robust_{sid}_log"
+        w   = f"snr_robust_{sid}_log_w"
+        df.loc[:, log] = gu._signed_log(df[raw].to_numpy(dtype=float))
+        df.loc[:, w]   = gu._winsor_per_mouse(df, log, mouse_col="mouse", lo=0.5, hi=99.5)
+    
     
     for (id1, id2) in id_pairs:
         col = f'{id1}_to_{id2}_{method}'
         if canonical:
             col = utils.canonical_pair(id1, id2)
-        tmp = df[[*group_cols, depth_col, col,
-                  f'int_optimized_{id1}{suff}',
-                  f"background_{id1}_rstd",
-                  f"background_{id2}_rstd",
-                  f"is_dim_by_bg_{id1}",
-                  f"is_dim_by_bg_{id2}",
-                  'detected_in_sessions',
-                  'n_sessions']].copy()
+
+        tmp = df.copy()
         
         tmp['pair'] = f'{id1}_to_{id2}'
         tmp["bg_mean"]   = tmp[f"background_{id2}_rstd"]
-        #tmp["bg_mean"] = (tmp["bg_mean"] - tmp["bg_mean"].mean())/tmp["bg_mean"].std(ddof=0)
+        tmp["bg_mean"] = (tmp["bg_mean"] - tmp["bg_mean"].mean())/tmp["bg_mean"].std(ddof=0)
         tmp["bg_mean"] = tmp["bg_mean"].fillna(0)
-
+        tmp["snr_pre_log_w"] = tmp[f"snr_robust_{id1}_log_w"]#np.minimum(tmp[f"snr_robust_{id1}_log_w"],tmp[f"snr_robust_{id2}_log_w"])
+        tmp["snr_post_log_w"] = tmp[f"snr_robust_{id2}_log_w"]
+        tmp["snr_overall_log_w"] = 0.5 * (
+            tmp[f"snr_robust_{id1}_log_w"] + tmp[f"snr_robust_{id2}_log_w"]
+        )
+        tmp["snr_asym_log_w"] = (
+            tmp[f"snr_robust_{id2}_log_w"] - tmp[f"snr_robust_{id1}_log_w"]
+        )
         tmp.rename(columns={f'int_optimized_{id1}{suff}':'baseline_int', depth_col:'z'}, inplace=True)
         tmp['y_up']     = (tmp[col] == 'up').astype(int)
         tmp['y_down']   = (tmp[col] == 'down').astype(int)
-        tmp['is_bgr']   = tmp['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) and utils.in_s(x, id2)))
-        tmp['is_bgr'] = (~(tmp['n_sessions'] ==3))
-        #tmp['is_bgr'] = False
+        
+        if exclude == "not_pair":
+            tmp['is_bgr']   = tmp['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) and utils.in_s(x, id2)))
+        elif exclude == "changing":
+            tmp['is_bgr'] = (~(tmp['n_sessions'] ==3))
+        else:
+            tmp['is_bgr'] = False
         
         recs.append(tmp)
     long = pd.concat(recs, ignore_index=True)
@@ -141,6 +152,12 @@ def build_long(df,
     # Switch between all and active in both sessions only - maybe one session too?
     long_nobgr = long[long['is_bgr'] == 0].copy()
     #long_nobgr = long.copy()
+
+    for c in ["snr_pre_log_w", "snr_post_log_w", "snr_overall_log_w", "snr_asym_log_w"]:
+        m, s = long_nobgr[c].mean(), long_nobgr[c].std(ddof=0) or 1.0
+        long_nobgr[c.replace("_log_w","_std")] = (long_nobgr[c] - m) / s
+        
+    #long_nobgr["snr"] = long_nobgr["snr_min_std"]
 
     # Construct cluster id robustly
     long_nobgr['cluster'] = long_nobgr[group_cols[0]].astype(str)
@@ -153,7 +170,7 @@ def cluster_weights(groups):
     labels = np.unique(np.asarray(groups))
     return w.reindex(labels).to_numpy(), labels
 
-def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.cov_struct.Independence(), cov_type="robust", 
+def fit_gees(long_nobgr, formula = None, add_pair_effect=True, method='robust', cov_struct=sm.cov_struct.Independence(), cov_type="robust", 
              weighted=False, ref="ctx1_to_ctx2", canonical=False):
     # Design matrix (tune as you like)
     # Include baseline_int (start-session intensity), depth (and optional quadratic), and pair fixed effects.
@@ -162,10 +179,10 @@ def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.co
 
     if canonical:
         ref = utils.canonical_from_pair_label(ref)
-    formula = f'1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference="{ref}"))'
-
-    X = pt.dmatrix(formula, long_nobgr, return_type='dataframe')
     
+    print(formula)
+    X = pt.dmatrix(formula, long_nobgr, return_type='dataframe')
+    long_nobgr = long_nobgr.loc[X.index].copy()
 
         
     groups = long_nobgr['mouse'].to_numpy()
@@ -184,6 +201,7 @@ def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.co
     cov_up  = type(cov_struct)()  
     cov_down= type(cov_struct)()
 
+
     # Up vs not-up
     gee_up = GEE(endog=long_nobgr['y_up'], exog=X, groups=groups,
                  cov_struct=cov_up, family=Binomial(), weights=w).fit(cov_type=cov_type, scale=1.0)
@@ -194,9 +212,8 @@ def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.co
     
     qic_up = gee_up.qic(scale=1.0)
     qic_down = gee_down.qic(scale=1.0)
-    print("QIC up: ",qic_up,"QIC down: ",qic_down)
-    #print(gee_up.summary())
-    #print(gee_down.summary())
+    #print("QIC up: ",qic_up,"QIC down: ",qic_down)
+
     return gee_up, gee_down, w
 
 
@@ -206,11 +223,6 @@ def fit_gees(long_nobgr, add_pair_effect=True, method='robust', cov_struct=sm.co
 #TODO  marked to reuse for inspector problems
 
 #with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-    print(classified_df[["detected_in_sessions"]+[f"is_dim_by_bg_{sid}" for sid in SESSIONS]].head(1))
-for sid in SESSIONS:    
-    print(classified_df[f"is_dim_by_bg_{sid}"].mean())
-
 
 
 #%% sweeper definition
@@ -218,190 +230,7 @@ import patsy as pt
 from scipy.stats import norm
 from scipy.special import expit as logistic
 
-# --- small utils --------------------------------------------------------------
 
-
-def _gee_names_beta_V(res):
-    names = list(res.model.exog_names)
-    beta  = pd.Series(res.params, index=names)
-    V     = pd.DataFrame(res.cov_params(), index=names, columns=names)
-    return names, beta, V
-
-def _x_for_pair(names, pair_label):
-    x = np.zeros(len(names))
-    x[names.index("Intercept")] = 1.0
-    if pair_label is not None:
-        for j, nm in enumerate(names):
-            if nm.endswith(f"[T.{pair_label}]"):
-                x[j] = 1.0
-    return x
-
-def _wald_omnibus_pair(res, prefix='C(pair', n_clusters=None):
-    names = res.model.exog_names
-    idx   = [i for i,n in enumerate(names) if n.startswith(prefix)]
-    if not idx:
-        return np.nan
-    L = np.zeros((len(idx), len(names)))
-    for r, j in enumerate(idx):
-        L[r, j] = 1.0
-    df1 = len(idx)
-    w = res.wald_test(L, scalar=True)
-    print("degrees of freedom sanity check ", df1)
-    if res.cov_type == "bias_reduced":
-        return float(w.pvalue), float(np.asarray(w.statistic))
-    else:
-        if n_clusters is None:
-            raise ValueError("n_clusters required for F correction")
-        df2 = max(int(n_clusters) - 1, 1)
-        chi2 = float(np.asarray(w.statistic))
-        Fstat = chi2 / df1
-        p = 1.0 - fdist.cdf(Fstat, df1, df2)
-        return float(p), float(Fstat)
-
-def _pair_prob_ci(names, beta, V, pair_label):
-    x = _x_for_pair(names, pair_label)
-    eta = float(x @ beta)
-    var = float(x @ V @ x)
-    se  = np.sqrt(max(var, 0.0))
-    p   = logistic(eta)
-    lo, hi = logistic(eta - 1.96*se), logistic(eta + 1.96*se)
-    return dict(eta=eta, se=se, prob=p, lo=lo, hi=hi)
-
-def _contrast_vs_ref_p(names, beta, V, pair_label, ref_label):
-    xa = _x_for_pair(names, pair_label)
-    xb = _x_for_pair(names, ref_label)
-    c  = xa - xb
-    est = float(c @ beta)
-    var = float(c @ V @ c)
-    se  = np.sqrt(max(var, 0.0))
-    z   = est / se if se > 0 else np.nan
-    p   = 2*(1 - norm.cdf(abs(z))) if np.isfinite(z) else np.nan
-    return est, se, z, p
-
-def pair_prob_ci_avgpred(res, df, pair_label,ref_label, alpha=0.05, weights=None):
-    p_bar, grad = pair_emm_and_grad(res, df, pair_label,ref_label, weights=weights)
-    V = np.asarray(res.cov_params(), dtype=float)
-    var = float(grad @ V @ grad)
-    se = var**0.5
-
-    z = norm.ppf(1 - alpha/2)
-    lo, hi = p_bar - z*se, p_bar + z*se
-    return {"prob": p_bar, "lo": max(0.0, lo), "hi": min(1.0, hi), "se_prob": se}
-
-def _pair_avgpred_and_grad(res, df, pair_label, ref_label):
-    d = df.copy()
-    ALL_LEVELS = df["pair"].unique().tolist()
-
-
-    d["pair"] = pd.Categorical([pair_label]*len(d), categories=ALL_LEVELS)
-    formula = f'1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference={ref_label}))'
-    X = pt.dmatrix(formula, d, return_type='dataframe')
-    eta = X @ res.params.values
-    p = 1.0 / (1.0 + np.exp(-eta))
-    p_bar = float(p.mean())
-    p_arr = np.asarray(p)
-    X_arr = np.asarray(getattr(X, "values", X))
-    grad = (p_arr * (1 - p_arr))[:, None] * X_arr
-    grad = grad.mean(axis=0)
-    return p_bar, grad
-
-def pair_emm_and_grad(res, df, pair_label, ref_label, mouse_col="mouse", weights=None, estimand="cell"):
-    """
-    EMM on the probability scale for a given pair level, with a delta-method gradient
-    that matches the averaging scheme.
-
-    If row_weights is None, we compute a mouse-balanced EMM:
-      - predict for each row with pair fixed to `pair_label`
-      - average within mouse (simple mean of that mouse's rows)
-      - average equally across mice
-    If row_weights is provided (1-D array aligned to df), we do a weighted average
-    using those same weights (normalized to sum to 1).
-    """
-    d = df.copy()
-    all_levels = pd.Categorical(df["pair"]).categories
-    d["pair"] = pd.Categorical([pair_label]*len(d), categories=all_levels)
-
-
-    formula = f"1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference='{ref_label}'))"
-    X = pt.dmatrix(formula, d, return_type='dataframe')
-
-    eta = X @ res.params.values
-    p   = 1.0 / (1.0 + np.exp(-eta))
-    p = np.asarray(p, dtype=float).reshape(-1)
-    print(weights)
-    X_arr = np.asarray(getattr(X, "values", X))
-    if weights is not None:
-        w = np.asarray(weights, dtype=float).reshape(-1)
-        w = w / w.sum()
-        p_bar = float((w * p).sum())
-        # gradient: d mean / d beta = sum_i w_i * p_i*(1-p_i) * x_i
-        X_arr = np.asarray(getattr(X, "values", X))
-        grad  = (w[:,None] * (p*(1-p))[:,None] * X_arr).sum(axis=0)
-        return p_bar, grad
-
-
-
-    if estimand == "cell":
-        # simple row-average (cell-level estimand)
-        p_bar = float(p.mean())
-        grad  = (((p*(1-p))[:, None]) * X_arr).mean(axis=0)
-        return p_bar, grad
-
-    if estimand == "mouse":
-        # mouse-balanced: within-mouse mean, then mean across mice
-        p_bar = float(d.assign(p=p).groupby(mouse_col)["p"].mean().mean())
-        mats = []
-        for _, sub in d.groupby(mouse_col, sort=False):   # <-- 3)
-            idx = sub.index.to_numpy()
-            gm  = ((p[idx]*(1-p[idx]))[:, None] * X_arr[idx, :]).mean(axis=0)
-            mats.append(gm)
-        grad = np.vstack(mats).mean(axis=0)
-        return p_bar, grad
-
-
-def _LL_vs_avg_stats(res, df, V, ref_label, LC_label, CC_label, alpha=0.05, df_t=None, weights = None):
-    # LC and CC: marginal means + gradients
-    # p_LC, g_LC = _pair_avgpred_and_grad(res, df, LC_label)
-    # p_CC, g_CC = _pair_avgpred_and_grad(res, df, CC_label)
-
-    p_LC, g_LC = pair_emm_and_grad(res, df, LC_label,ref_label, weights = weights)
-    p_CC, g_CC = pair_emm_and_grad(res, df, CC_label,ref_label, weights = weights)
-
-    # Average of LC and CC
-    p_avg  = 0.5 * (p_LC + p_CC)
-    g_avg  = 0.5 * (g_LC + g_CC)
-    var_avg = float(g_avg @ V @ g_avg)
-    se_avg  = np.sqrt(max(var_avg, 0.0))
-
-    
-    p_REF, g_REF = pair_emm_and_grad(res, df, ref_label,ref_label, weights = weights)
-
-    # Contrast (REF − AVG) on probability scale
-    delta   = p_REF - p_avg
-    g_delta = g_REF - g_avg
-    var_delta = float(g_delta @ V @ g_delta)
-    se_delta  = np.sqrt(max(var_delta, 0.0))
-    z_delta   = delta / se_delta if se_delta > 0 else np.nan
-
-    # p-value: t-correct if needed
-    if df_t is None:
-        p_val = 2 * norm.sf(abs(z_delta))
-    else:
-        p_val = 2 * stats.t.sf(abs(z_delta), df_t)
-
-    z = norm.ppf(1 - alpha/2)
-    avg_lo, avg_hi = p_avg - z*se_avg, p_avg + z*se_avg
-
-    return {
-        "p_LL_vs_avg": p_val,
-        "p_LL_vs_avg_Holm": p_val,     # single contrast → Holm = p
-        "avg_coeff": p_avg,
-        "avg_CI_low": max(0.0, avg_lo),
-        "avg_CI_hi":  min(1.0, avg_hi),
-        "avg_SE_prob": se_avg,
-        "delta_p": delta,
-        # (optionally return REF too if you want)
-    }
 
 # --- main collector -----------------------------------------------------------
 
@@ -412,7 +241,8 @@ def sweep_gee_to_csv(
     build_long_fn,
     fit_fn,                 # function(long_df, ...) -> (gee_up, gee_down, weights)
     pairs,                  # list of (before, after[, label])
-    sessions,               # SESSIONS
+    sessions,  
+    formula=None,             
     cells_label="no_bgr",
     ref_label="landmark1_to_landmark2",
     weighted=False,
@@ -460,28 +290,37 @@ def sweep_gee_to_csv(
         ref_use = ref_label#_pick_ref_label(data_labels, canonical, ref_fallback)
         assert ref_use in data_labels, f"reference level '{ref_use}' not present in data labels {data_labels}"
 
+        pre_formula = (
+            f'1 + snr_pre_std + snr_post_std  + z '
+            f'+ C(pair, Treatment(reference="{ref}"))'
+        )
+        # long_df, fixed0, prep_stats = gemm.prepare_covariates(
+        #     long_df,
+        #     formula_for_fit=pre_formula,         # NA handling aligned to your model
+        #     mouse_col="mouse",
+        #     mundlak_var="bg_mean",
+        #     center_vars=("snr_pre_std","snr_post_std","z")
+        # )
 
+        formula=pre_formula
 
         need_cols = ["y_up","y_down","baseline_int","bg_mean","z","pair","mouse"]
-
-        formula = f'1 + baseline_int + bg_mean + bs(z, df=4) + C(pair, Treatment(reference="{ref_label}"))'
-
-
-
 
 
         # 3) fit
         gee_up_ex,  gee_down_ex,  weights = fit_fn(
-             long_df, cov_type="robust", cov_struct=Exchangeable(), weighted=weighted, canonical=canonical
+             long_df, formula = formula, cov_type="robust", cov_struct=Exchangeable(), weighted=weighted, canonical=canonical, ref=ref_label
          )
         gee_up_ind, gee_down_ind, weights = fit_fn(
-             long_df, cov_type="robust", cov_struct=Independence(),  weighted=weighted, canonical=canonical
+             long_df, formula = formula, cov_type="robust", cov_struct=Independence(),  weighted=weighted, canonical=canonical, ref = ref_label
          )
 
-        
+        print(gee_up_ind.summary())
+        print(gee_down_ind.summary())
         ref_use = ref_label
-
-        
+        pair_label = "landmark_to_ctx"  # example
+        dp_base = gemm.delta_prob_test(gee_up_ex, long_df, pair_label, ref_label, formula=pre_formula, df_t=8-1, averaging="mouse", mouse_col="mouse")["delta"]
+        print(dp_base)
         try:
              rho_hat   = float(getattr(gee_up_ex.cov_struct,  "dep_params", np.nan))
              rho_hat_d = float(getattr(gee_down_ex.cov_struct,"dep_params", np.nan))
@@ -494,7 +333,7 @@ def sweep_gee_to_csv(
         ex_qic_down  = gee_down_ex.qic(scale=1.0)
         ind_qic_up   = gee_up_ind.qic(scale=1.0)
         ind_qic_down = gee_down_ind.qic(scale=1.0)
-
+        print("QIC : ", ind_qic_up, ind_qic_down)
         # 4) iterate for UP/DOWN models
         for outcome_label, res in (("UP", gee_up_ind), ("DOWN", gee_down_ind)):
             N = int(getattr(res.model.endog, "shape", [len(long_df)])[0])
@@ -505,8 +344,8 @@ def sweep_gee_to_csv(
             sizes = long_df.groupby('mouse').size()
             cluster_mean = float(sizes.mean()); cluster_min = int(sizes.min()); cluster_max = int(sizes.max())
 
-            group_p, group_chi = _wald_omnibus_pair(res, n_clusters=n_clusters)
-            names, beta, V = _gee_names_beta_V(res)
+            group_p, group_chi = gemm.wald_omnibus_for_factor(res, n_clusters=n_clusters)
+            names, beta, V = gemm.names_beta_V(res)
 
             # choose which labels to report: all except the reference
             comp_labels = [lab for lab in data_labels if lab != ref_use]
@@ -518,36 +357,39 @@ def sweep_gee_to_csv(
 
             # compute ref (prob-scale EMM) once
 
-            ref_emm = pair_prob_ci_avgpred(res, long_df, ref_use, ref_use, weights=weights)
+            ref_emm = ref_emm = gemm.emm_prob_ci(
+                res, long_df, ref_use, ref_use,
+                formula=formula,
+                averaging=("weights" if weights is not None else "cell"),
+                weights=weights
+            )
             se_prob_ref = ref_emm["se_prob"]
             
             for lab in comp_labels:
                 key = utils.slug_for_cols(lab)
 
                 # LOGIT-scale contrast vs ref
-                est, se, z, p_logit = _contrast_vs_ref_p(names, beta, V, lab, ref_use)
+                est, se, z, p_logit = gemm.contrast_vs_ref_logit(res, lab, ref_use)
                 if df_t is not None and np.isfinite(z):
                     p_logit = 2 * stats.t.sf(abs(z), df_t)
 
-                # PROB-scale Δp via delta method (avg-of-preds gradient)
-                p_pair, g_pair = pair_emm_and_grad(res, long_df, lab,ref_use, weights=weights)
-                p_ref,  g_ref  = pair_emm_and_grad(res, long_df, ref_use,ref_use, weights=weights)
-                Vnp = np.asarray(res.cov_params(), dtype=float)
-                delta   = p_pair - p_ref
-                g_delta = g_pair - g_ref
-                se_delta = float((g_delta @ Vnp @ g_delta) ** 0.5)
-                if se_delta <= 1e-12:
-                    p_prob = 1.0   
-                else:                                
-                    if df_t is not None and se_delta > 0:
-                        tstat = delta / se_delta
-                        p_prob = 2 * stats.t.sf(abs(tstat), df_t)
-                    else:
-                        zstat = delta / se_delta if se_delta > 0 else np.nan
-                        p_prob = 2 * norm.sf(abs(zstat)) if np.isfinite(zstat) else np.nan
+                df_t = n_clusters - 1 if (res.cov_type != "bias_reduced") else None
+                delta_info = gemm.delta_prob_test(
+                    res, long_df, lab, ref_use,
+                    formula=formula,
+                    df_t=df_t,
+                    averaging=("weights" if weights is not None else "cell"),
+                    weights=weights
+                )
+                p_prob = delta_info["p"]
 
                 # Probabilities & CI shown (avg-of-predictions)
-                pr = pair_prob_ci_avgpred(res, long_df, lab,ref_use, weights=weights)
+                pr = gemm.emm_prob_ci(
+                    res, long_df, lab, ref_use,
+                    formula=formula,
+                    averaging=("weights" if weights is not None else "cell"),
+                    weights=weights
+                )
 
                 tmp[lab] = dict(
                     p_prob=p_prob, p_logit=p_logit,
@@ -560,7 +402,7 @@ def sweep_gee_to_csv(
                       type(p_prob).__name__, type(p_logit).__name__)
 
             # Holm corrections (over all pair-vs-ref tests)
-            from statsmodels.stats.multitest import multipletests
+
             _, p_holm_prob,  _, _ = multipletests([p for p in pvals_prob if pd.notnull(p)],  method="holm") if any(pd.notnull(p) for p in pvals_prob) else (None, [], None, None)
             _, p_holm_logit, _, _ = multipletests([p for p in pvals_logit if pd.notnull(p)], method="holm") if any(pd.notnull(p) for p in pvals_logit) else (None, [], None, None)
 
@@ -657,34 +499,84 @@ def sweep_gee_to_csv(
 
 
 
-
-#%%
-
-#sweep_thresholds([0.5, 0.75, 1, 1.25], classify_transitions, build_long, fit_gees, contrast_fn=None)
-
 #%% main sweeper call
 filteredby = "lcc_active3"
-
-thresholds = [0.75, 1]
+SESSIONS = SESSIONS_lcc
+thresholds = [1]
 pairs = [['landmark','ctx1'], ['ctx1','ctx2']]#['landmark1','landmark2'], ['ctx','landmark1']]#, ['landmark','ctx1'], ['ctx1','ctx2']]
+#pairs = [["ctx", "landmark1"], ["landmark1", "landmark2"]]
 all_mice = lcc
+
+#" + bg_mean_within + bg_mean_mouse  "
+ref = "ctx_to_ctx"#"landmark_to_landmark"#
+formula = f'1 + snr_post_std + snr_pre_std + bg_mean_mouse + bs(z, df=4) + C(pair, Treatment(reference="{ref}"))'
+
+
+
+
+
 gee_up_ind, gee_down_ind = sweep_gee_to_csv(
     thresholds,
     classify_transitions,
     build_long,
     fit_gees,                 # function(long_df, cov_type) -> (gee_up, gee_down)
     pairs,                  # list of (before, after, label)
-    SESSIONS,               # SESSIONS
+    SESSIONS,  
+    formula=formula,
     cells_label=filteredby,
-    ref_label="ctx_to_ctx",#landmark1_to_landmark2",
+    ref_label=ref,
     weighted = True,
     canonical = True
 )
-#%%
-gee_down_ind.summary()
+
+#%% covariate model evaluation
+classified_df = classify_transitions(lcc, pairs, session_ids = SESSIONS, sd_threshold = 0.75, method = 'robust', canonical = False)
+long, _ = build_long(classified_df, pairs, group_cols=['mouse'], method='robust', canonical = False, exclude="changing")
+
+ref = "ctx_to_ctx"
+pair = "landmark_to_ctx"
+
+long = utils.ensure_pair_canonical(long, canonical=True)
+
+pre_formula = (
+    f'1 + snr_pre_std + snr_post_std +  z'
+    f'+ C(pair, Treatment(reference="{ref}"))'
+)
+long_prep, fixed0, prep_stats = gemm.prepare_covariates(
+    long,
+    formula_for_fit=pre_formula,         # NA handling aligned to your model
+    mouse_col="mouse",
+    mundlak_var="bg_mean",
+    center_vars=("snr_pre_std","snr_post_std","z")
+)
+
+
+form_mund = f'1 + snr_pre_std + snr_post_std + bg_mean_within + bg_mean_mouse + C(pair, Treatment(reference="{ref}"))'
+
+up_m, dn_m, wm = fit_gees(long_prep, formula=form_mund, weighted=True, ref=ref, canonical=True, cov_struct = Exchangeable())
+
+def contrast_stats(res, df, form):
+    out = gemm.delta_prob_test(res, df, pair, ref, formula=form, df_t=df["mouse"].nunique()-1,
+                               averaging="mouse", mouse_col="mouse")#, set_fixed = fixed0)
+    return out["delta"], out["se"], out["p"]
+
+dp_m, se_m, p_m = contrast_stats(up_m, long_prep, form_mund)
+
+# print(f"Δp base={dp_b:.4f}, Δp +bg_mouse={dp_m:.4f}, shift={dp_m-dp_b:.4f} ({100*(dp_m-dp_b):.1f} pp)")
+# print(f"SE base={se_b:.4f}, SE +bg_mouse={se_m:.4f}, standardized shift S={S:.2f}")
+# print(f"p base={p_b:.4g}, p +bg_mouse={p_m:.4g}")
+print("QIC UP  =", up_m.qic(scale=1.0)[0], dn_m.qic(scale=1.0)[0])
+
+
+print("For up ",dp_m,"p_val ", p_m)
+dp_m, se_m, p_m = contrast_stats(dn_m, long_prep, form_mund)
+print("For down: delta ",dp_m,"p_val ", p_m)
+    
 
 
 #%%
+print(up_m.summary())
+
 #%%
 
 cutoffs = [0.75,1]
@@ -836,4 +728,4 @@ gp.plot_p_vs_cutoff_with_counts(
 
 
 #%%
-
+long[["bg_mean"]].describe()
