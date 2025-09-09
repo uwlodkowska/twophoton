@@ -25,12 +25,12 @@ def appeared_in_sessions(row_sessions, sessions_to_check, exclusive=False):
     return False
 
 def get_cell_status(row, id_pair):
-    if id_pair[0] in row["detected_in_sessions"]:
-        if id_pair[1] in row["detected_in_sessions"]:
+    if id_pair[0] in row["detected_in_sessions"] and (not row[f'is_dim_by_bg_{id_pair[0]}']):
+        if id_pair[1] in row["detected_in_sessions"] and not(row[f'is_dim_by_bg_{id_pair[1]}']):
             return "const"
         else:
             return "off"
-    elif id_pair[1] in row["detected_in_sessions"]:
+    elif id_pair[1] in row["detected_in_sessions"] and not (row[f'is_dim_by_bg_{id_pair[1]}']):
         return "on"
     return "_"
 
@@ -173,107 +173,168 @@ def gather_cells_specificity_percentages_across_mice(regions, config, classes, n
 
 
 
+# Fallback parser if you don't want to depend on your utils.parse_setlike
+def _parse_setlike(x):
+    if isinstance(x, (set, list, tuple)): return set(map(str, x))
+    if isinstance(x, str):
+        # tolerant for "{a,b}" or "['a', 'b']" or "a,b"
+        x = x.strip().strip("{}[]()")
+        if not x: return set()
+        parts = [p.strip().strip("'\"") for p in x.split(",")]
+        return set(p for p in parts if p)
+    return set()
+
+def _denom_by_mouse(df_mouse: pd.DataFrame, a: str, b: str, how="union") -> int:
+    """
+    Count denominator for a single mouse: |A∪B| or |A∩B|.
+    Uses 'detected_in_sessions' if present; otherwise falls back to
+    presence in intensity columns int_optimized_{session}.
+    """
+    df_mouse = df_mouse.loc[~(df_mouse[f"is_dim_by_bg_{a}"]&df_mouse[f"is_dim_by_bg_{b}"])]
+    if "detected_in_sessions" in df_mouse.columns:
+        ssets = df_mouse["detected_in_sessions"].map(_parse_setlike)
+        if how == "union":
+            return int((ssets.apply(lambda s: a in s or b in s)).sum())
+        else:  # intersection
+            return int((ssets.apply(lambda s: a in s and b in s)).sum())
+    # fallback: look for non-missing intensities
+    a_col = f"int_optimized_{a}"
+    b_col = f"int_optimized_{b}"
+    has_a = df_mouse[a_col].notna() if a_col in df_mouse.columns else pd.Series(False, index=df_mouse.index)
+    has_b = df_mouse[b_col].notna() if b_col in df_mouse.columns else pd.Series(False, index=df_mouse.index)
+    if how == "union":
+        return int((has_a | has_b).sum())
+    else:
+        return int((has_a & has_b).sum())
+
+
+
+
 def gather_group_counts_across_mice(
-    regions,
+    all_mice,
     id_pairs,
-    config,
     groups=None,                 # default depends on ttype
     ttype="presence",            # "presence" -> on/off/const; "intensity" -> up/down/stable
     normalize=True,
-    dfs=None,
+    mouse_col = "mouse",
     denominator="union",         # "union" (|A∪B|) or "intersection" (|A∩B|) if you ever want that
-    return_counts=False          # also return a wide counts table ready for GLM
+    return_counts=False,          # also return a wide counts table ready for GLM
+    canonical: bool = False
 ):
     """
     Build a long table with counts and (optionally) percentages per Mouse×Pair×Group.
     Optionally return a wide counts table for GLMs (turnover/direction).
     """
 
-    # Choose default groups by type
     if groups is None:
-        groups = ["on", "off", "const"] if ttype == "presence" else ["up", "down", "stable"]
+        groups = ["on","off","const"] if ttype == "presence" else ["up","down","stable"]
 
+    df = all_mice.copy()
+
+    df = df.loc[df["n_sessions"]<3]
+
+
+    # 2a) status columns (once on the whole table)
+    if ttype == "presence":
+        # expects to create columns like f"{a}_to_{b}" with {"on","off","const"}
+        df = on_off_cells(df, id_pairs)
+    else:
+        # expects {"up","down","stable"} in f"{a}_to_{b}"
+        df = up_down_cells(df, id_pairs)
+
+    # 2b) aggregate per mouse (and region)
     rows = []
+    grp_keys = [mouse_col]
 
-    # 1) Load dataframes if not provided
-    if dfs is None:
-        dfs = []
-        for mouse, region in regions:
-            dfs.append(utils.read_pooled_with_background(mouse, region, config))
+    for (a, b) in id_pairs:
+        pair_col = f"{a}_to_{b}"
+        if pair_col not in df.columns:
+            # skip silently if a/b columns missing in this dataset slice
+            continue
 
-    # 2) Loop mice
-    for (i, df_raw) in enumerate(dfs):
-        df = df_raw.copy()
-        mouse, region = regions[i]
+        # background summaries per mouse (useful covariate context)
+        # do it pairwise so A/B map properly
+        bgA = f"background_{a}"
+        bgB = f"background_{b}"
+        have_bgA = bgA in df.columns
+        have_bgB = bgB in df.columns
 
-        # 2a) Create per-pair status columns
-        if ttype == "presence":
-            df = on_off_cells(df, id_pairs)      # expects values in {"on","off","const"}
-        else:
-            df = up_down_cells(df, id_pairs)     # expects values in {"up","down","stable"}
+        for gvals, sub in df.groupby(grp_keys, observed=True, sort=False):
+            # gvals is a tuple if region is included; make accessors
+            
+            #sub = sub.loc[~(sub[f'is_dim_by_bg_{a}']|sub[f'is_dim_by_bg_{b}'])]
+            mouse_val = gvals if isinstance(gvals, (str, int)) else gvals[0]
+            region_val = None
+            if len(grp_keys) == 2:
+                region_val = gvals[1]
 
-        # 2b) For each pair, get group counts and denominator
-        for (a, b) in id_pairs:
-            if (f'int_optimized_{a}' in df.columns) and (f'int_optimized_{b}' in df.columns):
-                pair_col = f"{a}_to_{b}"
-    
-                # counts for this pair
-                vc = df[pair_col].astype(str).str.lower().value_counts()
-                counts = {g: int(vc.get(g, 0)) for g in groups}
-    
-                # denominator
-                if denominator == "union":
-                    n = cell_count_for_sessions(df, {a, b}, exclusive=False)  # |A∪B|
-                elif denominator == "intersection":
-                    n = cell_count_for_sessions(df, {a, b}, exclusive=True)   # |A∩B|
-                else:
-                    raise ValueError('denominator must be "union" or "intersection"')
-    
-                # write one row per group
-                for g in groups:
-                    cnt = counts[g]
-                    pct = (cnt / n) if (normalize and n > 0) else (np.nan if normalize else None)
-                    rows.append({
-                        "Mouse": mouse,
-                        "Region": region,
-                        "mouse_id": f"m{mouse}r{region}",
-                        "session_from": a,
-                        "session_to": b,
-                        "Pair": f"{a}_to_{b}",
-                        "bg_A" : df[f"background_{a}"].mean(),
-                        "bg_B" : df[f"background_{b}"].mean(),
-                        "bg_std_A" : df[f"background_{a}"].std(),
-                        "bg_std_B" : df[f"background_{b}"].std(),
-                        "group": g,
-                        "count": cnt,
-                        "n": n,
-                        "percentage": pct
-                    })
+            # counts of statuses within this mouse (sub-table)
+            vc = sub[pair_col].astype(str).str.lower().value_counts()
+            counts = {g: int(vc.get(g, 0)) for g in groups}
+
+            # denominator for this mouse (union/intersection)
+            n = _denom_by_mouse(sub, a, b, how=denominator)
+            print(np.array(list(counts.values()))/n)
+            print(n)
+            # background summaries (mouse-level, not pair-filtered)
+            bg_A_mean = float(sub[bgA].mean()) if have_bgA else np.nan
+            bg_B_mean = float(sub[bgB].mean()) if have_bgB else np.nan
+            bg_A_std  = float(sub[bgA].std())  if have_bgA else np.nan
+            bg_B_std  = float(sub[bgB].std())  if have_bgB else np.nan
+
+            # label to write
+            pair_label_out = utils.canonical_pair(a,b) if canonical else f"{a}_to_{b}"
+
+            for grp in groups:
+                cnt = counts[grp]
+                pct = (cnt / n) if (normalize and n > 0) else (np.nan if normalize else None)
+                row = {
+                    "Mouse": mouse_val,
+                    "mouse_id": str(mouse_val),
+                    "Pair": pair_label_out,
+                    "session_from": a,
+                    "session_to": b,
+                    "group": grp,
+                    "count": cnt,
+                    "n": int(n),
+                    "percentage": pct,
+                    "bg_A": bg_A_mean,
+                    "bg_B": bg_B_mean,
+                    "bg_std_A": bg_A_std,
+                    "bg_std_B": bg_B_std,
+                }
+                if region_val is not None:
+                    row["Region"] = region_val
+                    row["mouse_id"] = f"m{mouse_val}r{region_val}"
+                rows.append(row)
 
     df_long = pd.DataFrame(rows)
 
     if not return_counts:
         return df_long
 
-    # 3) Build a wide counts table per Mouse×Pair (ready for GLMs)
-    # Pivot group counts
+    # wide counts per Mouse×Pair
+    index_cols = ["Mouse","mouse_id","Pair","bg_A","bg_B","bg_std_A","bg_std_B"]
+    if "Region" in df_long.columns:
+        index_cols.insert(1, "Region")
+
     df_counts = (
         df_long
-        .pivot_table(index=["Mouse","Region","mouse_id","Pair", "bg_A", "bg_B", "bg_std_A", "bg_std_B"],
-                     columns="group", values="count", aggfunc="sum", fill_value=0)
+        .pivot_table(index=index_cols, columns="group", values="count",
+                     aggfunc="sum", fill_value=0)
         .reset_index()
     )
 
-    # Make sure expected columns exist
+    # ensure expected columns exist
     for col in ["on","off","const","up","down","stable"]:
         if col not in df_counts.columns:
             df_counts[col] = 0
 
-    # Denominator per Pair (union)
-    n_per_pair = df_long.groupby(["Mouse","Region","mouse_id","Pair"])["n"].max().reset_index(name="n")
-    df_counts = df_counts.merge(n_per_pair, on=["Mouse","Region","mouse_id","Pair"], how="left")
+    # denominator per Mouse×Pair
+    n_per = df_long.groupby(index_cols)["n"].max().reset_index(name="n")
+    df_counts = df_counts.merge(n_per, on=index_cols, how="left")
 
-    # Derived columns depending on ttype
+    # derived proportions
     if ttype == "presence":
         df_counts["changed"] = df_counts["on"] + df_counts["off"]
         df_counts["prop_changed"] = np.where(df_counts["n"] > 0,
@@ -281,7 +342,6 @@ def gather_group_counts_across_mice(
         df_counts["prop_on"] = np.where(df_counts["changed"] > 0,
                                         df_counts["on"] / df_counts["changed"], np.nan)
     else:
-        # intensity classification: "up/down/stable"
         df_counts["changed"] = df_counts["up"] + df_counts["down"]
         df_counts["prop_changed"] = np.where(df_counts["n"] > 0,
                                              df_counts["changed"] / df_counts["n"], np.nan)

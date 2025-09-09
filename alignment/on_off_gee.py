@@ -22,10 +22,11 @@ import gee_utils as gu
 
 #%% config
 
-#SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", suff= "_cll", idx=0)
+#SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", suff= "_lcc", idx=1)
 SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/multisession.yaml")
-
+#SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/context_only.yaml", suff= "_cll")
 #%%
+#SESSIONS = SESSIONS[:3]
 id_pairs = list(zip(SESSIONS, SESSIONS[1:]))#[1:3]
 #%%
 all_mice = cc.on_off_cells(all_mice, id_pairs)
@@ -116,19 +117,25 @@ def build_long(df,
         )
 
         Tcount = tmp["detected_in_sessions"].apply(
-            lambda s: sum(utils.in_s(s, t) for t in ["landmark1","landmark2","ctx1"])#,"ctx2"])
+            lambda s: sum(utils.in_s(s, t) for t in ["landmark1","landmark2","ctx1","ctx2"])
         )
-        mask = ((Tcount<2))
+        mask = ((Tcount==4))
         
         Bcount = tmp["detected_in_sessions"].apply(
             lambda s: sum(utils.in_s(s, t) for t in ["s0"])
         )
         
 
-        m13_mask = ((tmp["mouse"]=='13') | (Tcount == 3))
+        
         #tmp['is_bgr'] = mask | m13_mask
-        tmp['is_bgr'] =  (tmp["n_sessions"] == 5)
-        tmp['is_bgr'] = False
+        tmp['is_bgr'] =  (tmp["n_sessions"] == 3)
+        tmp['is_bgr']   = ((((tmp['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) 
+                                                                               or utils.in_s(x, id2)))) | (tmp[col]=="_")))|(mask))
+        
+        
+        tmp['is_bgr']   = ((((tmp['detected_in_sessions'].apply(lambda x: not (utils.in_s(x, id1) 
+                                                                               or utils.in_s(x, id2)))) | (tmp[col]=="_")))|(tmp["n_sessions"] == 5))
+        #tmp["is_bgr"] = False
         recs.append(tmp)
 
     long = pd.concat(recs, ignore_index=True)
@@ -160,6 +167,7 @@ PAIR_LEVELS = [
     ]
 #PAIR_LEVELS = ["landmark1_to_landmark2", "ctx_to_landmark1"]
 #PAIR_LEVELS = ["ctx1_to_ctx2", "landmark_to_ctx1"]
+#PAIR_LEVELS= ["s1_to_s2", "s2_to_s3"]
 
 long_mice, _ = build_long(less_mice, id_pairs)
 
@@ -168,27 +176,162 @@ long_mice, _ = build_long(less_mice, id_pairs)
 long_mice["z_std"] = (long_mice["z"] - long_mice["z"].mean()) / long_mice["z"].std(ddof=0)
 
 #%%
-long_mice_changed = (long_mice.loc[long_mice["y_const"]==0]).copy()
-#%%
 
-def make_mouse_weights(df, mouse_col="mouse"):
-    n = df.groupby(mouse_col).size()
-    w = (n.mean() / n).astype(float)  
-    return w.to_dict()
+import numpy as np, pandas as pd
+from collections import defaultdict
 
+def _sess_set(val, SESSIONS, utils_in_s):
+    """Return a set of sessions from val (set/list/tuple or string)."""
+    if isinstance(val, (set, list, tuple)):
+        return set(val)
+    # string-like
+    return {sid for sid in SESSIONS if utils_in_s(val, sid)}
 
-
-
-def attach_weights(d, mouse_col="mouse", name="w_full"):
-    w_map = make_mouse_weights(d, mouse_col="mouse")
-    w = d[mouse_col].map(w_map)
-    if w.isna().any():
-        w = w.fillna(1.0)
-    d[name] = w.astype(float)
+def per_mouse_cell_sessions(all_mice, SESSIONS,
+                            mouse_col="mouse", cell_col="cell_id", det_col="detected_in_sessions",
+                            utils_in_s=None):
+    """Dict: mouse -> {cell_id -> set(sessions)} (collapses duplicates by union)."""
+    d = defaultdict(dict)
+    for _, r in all_mice[[mouse_col, cell_col, det_col]].iterrows():
+        m, cid, raw = r[mouse_col], r[cell_col], r[det_col]
+        sset = _sess_set(raw, SESSIONS, utils_in_s)
+        if cid in d[m]:
+            d[m][cid] |= sset
+        else:
+            d[m][cid] = set(sset)
     return d
 
-long_mice = attach_weights(long_mice, name="w_full")
-long_mice_changed = attach_weights(long_mice_changed, name="w_full")
+def k2_consecutive_fraction(by_mouse, SESSIONS):
+    pos = {sid:i for i,sid in enumerate(SESSIONS)}
+    rows=[]
+    for m, cells in by_mouse.items():
+        pairs=[]
+        for sset in cells.values():
+            if len(sset)==2:
+                a,b = sorted(sset, key=lambda s: pos.get(s, -10))
+                if a in pos and b in pos:
+                    pairs.append(abs(pos[a]-pos[b])==1)
+        n=len(pairs)
+        rows.append({"mouse":m, "n_k2":n, "frac_consecutive": (np.mean(pairs) if n>0 else np.nan)})
+    return pd.DataFrame(rows)
+
+
+def retention_by_lag(by_mouse, SESSIONS):
+    pos = {sid:i for i,sid in enumerate(SESSIONS)}
+    out=[]
+    for m,cells in by_mouse.items():
+        T=len(SESSIONS)
+        daysets=[set() for _ in range(T)]
+        for cid, sset in cells.items():
+            for s in sset:
+                if s in pos: daysets[pos[s]].add(cid)
+        for lag in range(1,T):
+            vals=[]
+            for t in range(T-lag):
+                A, B = daysets[t], daysets[t+lag]
+                if len(A)>0:
+                    vals.append(len(A & B)/len(A))
+            if vals:
+                out.append({"mouse":m,"lag":lag,"retention":float(np.mean(vals)),"n_pairs":len(vals)})
+    return pd.DataFrame(out)
+
+def overlap_lift(by_mouse, SESSIONS):
+    pos = {sid:i for i,sid in enumerate(SESSIONS)}
+    out=[]
+    for m,cells in by_mouse.items():
+        T=len(SESSIONS); N=len(cells)
+        daysets=[set() for _ in range(T)]
+        for cid, sset in cells.items():
+            for s in sset:
+                if s in pos: daysets[pos[s]].add(cid)
+        for i in range(T):
+            for j in range(i+1,T):
+                A,B = daysets[i], daysets[j]
+                obs = len(A & B)
+                exp = (len(A)*len(B)/N) if N>0 else np.nan
+                lift = (obs/exp) if (exp and exp>0) else np.nan
+                out.append({"mouse":m,"i":i,"j":j,"lag":j-i,
+                            "overlap":obs,"expected":exp,"lift":lift})
+    return pd.DataFrame(out)
+
+
+# Build per-mouse cell session sets
+by_mouse = per_mouse_cell_sessions(less_mice, SESSIONS, utils_in_s=utils.in_s)
+
+# (A) K=2 fraction consecutive
+k2 = k2_consecutive_fraction(by_mouse, SESSIONS)
+print(k2.sort_values("n_k2", ascending=False).head(10))
+print("Across mice: mean frac_consecutive (K=2) =", np.nanmean(k2["frac_consecutive"]))
+
+# (B) Retention vs lag
+ret = retention_by_lag(by_mouse, SESSIONS)
+print(ret.pivot_table(index="mouse", columns="lag", values="retention"))
+print("Mouse-mean retention by lag:\n", ret.groupby("lag")["retention"].mean())
+
+# (C) Lift vs lag
+lift = overlap_lift(by_mouse, SESSIONS)
+print("Mouse-mean lift by lag:\n", lift.groupby("lag")["lift"].mean())
+# Optional: compare lag=1 vs all lag>1 at mouse level
+lag1 = lift[lift["lag"]==1].groupby("mouse")["lift"].mean()
+lagN = lift[lift["lag"]>1].groupby("mouse")["lift"].mean()
+common = lag1.index.intersection(lagN.index)
+diff = (lag1.loc[common] - lagN.loc[common]).dropna()
+print(f"Mean(lift lag1 − lag>1) across mice = {diff.mean():.3f}  (n={len(diff)})")
+
+
+
+
+
+
+
+
+
+
+#%%
+long_mice_changed = (long_mice.loc[long_mice["y_const"]==0]).copy()
+
+
+#%%
+# from statsmodels.stats.proportion import proportion_confint
+
+# d = all_mice.copy()
+# d = d[d["n_sessions"] == 2]
+# d["all_active"] = (d["n_sessions"]==2)
+
+# # 1) Pooled fraction + Wilson 95% CI (descriptive)
+# k = int(d["all_active"].sum())
+# N = int(len(d))
+# p_pooled = k / N
+# ci_lo, ci_hi = proportion_confint(k, N, method="wilson")
+
+# # 2) Per-mouse mean ± SD (primary summary)
+# per_mouse = d.groupby(["mouse"])["all_active"].mean()   # one proportion per mouse
+# mean_pm = per_mouse.mean()
+# sd_pm   = per_mouse.std(ddof=1)
+# sem_pm  = sd_pm / np.sqrt(per_mouse.size)
+
+# print(f"Pooled across cells: {p_pooled:.3f} (Wilson 95% CI {ci_lo:.3f}–{ci_hi:.3f}), Ncells={N}")
+# print(f"Per-mouse: {mean_pm:.3f} ± {sd_pm:.3f} SD (SEM {sem_pm:.3f}), Nmice={per_mouse.size}")
+
+
+
+#%%
+
+
+
+def attach_weights_ttest_equivalent(d, mouse_col="mouse", pair_col="pair", name="w_paired"):
+    dd = d.copy()
+    n_mp = dd.groupby([mouse_col, pair_col])["pair"].transform("size")
+    dd[name] = 1.0 / n_mp
+
+    # optional sanity check: sums to 1 within each mouse×pair
+    assert np.allclose(dd.groupby([mouse_col, pair_col])[name].sum().values, 1.0)
+
+    return dd
+
+
+long_mice = attach_weights_ttest_equivalent(long_mice, name="w_full")
+long_mice_changed = attach_weights_ttest_equivalent(long_mice_changed, name="w_full")
 
 
 
@@ -196,12 +339,15 @@ def fit_gees(long_nobgr, cov_struct=sm.cov_struct.Independence(), cov_type="robu
              weighted=False, 
              ref="ctx1_to_ctx2", 
              canonical=False, 
-             formula = None):
+             formula = None,
+             fit_col = 'y_const'):
     if canonical: 
         ref = utils.canonical_from_pair_label(ref) 
-     
+    
+        
+    
     X = pt.dmatrix(formula, long_nobgr, return_type='dataframe').astype(float)     
-    y = pd.to_numeric(long_nobgr['y_const'], errors='coerce').to_numpy()        # <- ensure float
+    y = pd.to_numeric(long_nobgr[fit_col], errors='coerce').to_numpy()        # <- ensure float
     groups = long_nobgr['mouse'].astype('category').cat.codes.to_numpy()
 
 
@@ -224,7 +370,7 @@ def fit_gees(long_nobgr, cov_struct=sm.cov_struct.Independence(), cov_type="robu
 
     
 
-    gee_const = GEE(endog=long_nobgr['y_const'], exog=X, 
+    gee_const = GEE(endog=long_nobgr[fit_col], exog=X, 
                     groups=groups, cov_struct=cov_up, 
                     family=Binomial(), weights=w).fit(cov_type=cov_type, scale=1.0) 
     
@@ -236,9 +382,10 @@ def fit_gees(long_nobgr, cov_struct=sm.cov_struct.Independence(), cov_type="robu
 ref = "landmark1_to_landmark2"
 ref = "ctx1_to_ctx2"
 #ref = "s0_to_landmark1"
+#ref= "s2_to_s3"
 
-formula = f'1 + C(pair, Treatment(reference="{ref}")) + C(mouse)+ snr'
-weights, res = fit_gees(long_mice, weighted = True, ref = ref, cov_struct=Independence(), formula=formula)
+formula = f'1 + C(pair, Treatment(reference="{ref}")) + snr'
+weights, res = fit_gees(long_mice, weighted = True, ref = ref, cov_struct=Independence(), formula=formula)#, fit_col="y_on")
 
 print(res.summary())
 
@@ -246,22 +393,26 @@ print(res.summary())
 
 #%%
 
+set_fixed = None#{"snr": 0}
+d = long_mice_changed.copy()
+d = long_mice.copy()
+
 emms = gu.pair_estimands(
-    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
-    averaging="mouse", set_fixed={"snr": 0}  
+    res, d, formula, PAIR_LEVELS,weights=None, ref_label=ref,
+    averaging="mouse", set_fixed=set_fixed  
 )
 
 # 2) Contrasts vs reference (Holm-adjusted), with Cohen’s dz
 contr = gu.contrasts_vs_reference(
-    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
-    averaging="mouse", set_fixed={"snr": 0}
+    res, d, formula, PAIR_LEVELS,weights=None, ref_label=ref,
+    averaging="mouse", set_fixed=set_fixed
 )
 
 #3) Omnibus Wald on probability scale (delta method, small-sample F)
 omni = gu.wald_omnibus_pair_delta(
-    res, long_mice, formula, PAIR_LEVELS,weights=weights, ref_label=ref,
-    averaging="mouse", set_fixed={"snr": 0},
-    n_clusters=long_mice["mouse"].nunique()
+    res, d, formula, PAIR_LEVELS,weights=None, ref_label=ref,
+    averaging="mouse", set_fixed=set_fixed,
+    n_clusters=d["mouse"].nunique()
 )
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
     print(emms)

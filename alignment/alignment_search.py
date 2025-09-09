@@ -8,7 +8,7 @@ import sys
 import yaml
 
 #%%
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/context_only.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
@@ -17,8 +17,6 @@ with open(config_file, "r") as file:
 DIR_PATH = config["experiment"]["dir_path"]
 RESULT_PATH = DIR_PATH + config["experiment"]["res_dir_path"]
 ICY_PATH = DIR_PATH + config["experiment"]["path_for_icy"]
-#TODO remove
-RESULT_PATH_SCA = "/mnt/data/fos_gfp_tmaze/multisession/despeckle/" + config["experiment"]["res_dir_path"]
 
 regions = config["experiment"]["regions"][0]
 group_session_order = config["experiment"]["session_order"][0]
@@ -39,7 +37,7 @@ def calculate_cropped_diff(substack1, substack2, x, y):
 def find_optimal_crop(substack1, substack2):
     expansions = 0
     step = 10
-    start_range = 20
+    start_range = 40
     x_start, y_start, x_end, y_end = -start_range, -start_range, start_range, start_range
 
     
@@ -86,9 +84,7 @@ def find_optimal_crop(substack1, substack2):
             y_end += step
 
         expansions += 1
-        break
-        
-    #print(f"range after expansions x {x_start}, {x_end}, y {y_start}, {y_end}")
+
 
     
     return np.array([[minx],[miny]]), minv
@@ -141,7 +137,7 @@ def truncate_along_z(stack1, stack2, prev_stacks, minz):
 def align_stacks(orig1, orig2, optimal_translations, minz, start_img_id, prev_stacks = None):
     z_truncated = truncate_along_z(orig1, orig2, prev_stacks, minz)
 
-    print("start image id ", start_img_id)
+    print("start image id ", start_img_id, " minz ", minz)
 
 
     difx = find_dims_post_alignment(z_truncated[0].shape[1], 
@@ -342,12 +338,19 @@ def align_sessions(mouse, region, start_session_id, file_suffix, session_order, 
 
 def align_all_sessions(m,r, session_order, partial=None):
     #print(m, r, session_order)
-    for start_img_id in range(1,len(session_order)):
+    for start_img_id in range(1,3):#len(session_order)):
         print("starting ", start_img_id, session_order)
         suff = "_" + str(session_order[start_img_id-1]) + "_" + str(session_order[start_img_id])
         align_sessions(m, r, start_img_id, suff, session_order, partial)
         print("-------------------------------------")
-        
+
 #%%
-for m,r in [[6,1]]:#, [6,1]]:
+#done:[1,2], [101,1], [10,1], [2,1], [102,1], [6,2], [12,1], [3,1], [9,2], [109,1],[103,1], [112,2]!
+#todo:
+#bad: [13,1], [14,1] (rotacja) [8,1] (skok) [5,1], [15,1],  [9,1] xy
+#ret ok: [10,1], [103,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1]
+# [109,1] - wieksze okna
+group_session_order = ["ret1", "ret2", "ret3"]
+regs = [[109,1],  [9,2]]#, [109,1], [102,1]]
+for m,r in regs:
     align_all_sessions(m,r,group_session_order, partial=None)

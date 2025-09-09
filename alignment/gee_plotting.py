@@ -9,6 +9,8 @@ Created on Tue Aug 19 00:39:28 2025
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import utils
+import re
 
 def _prep(df, direction):
     d = df[df['direction'] == direction].copy()
@@ -238,91 +240,154 @@ def _row_at_cutoff(df, direction, cutoff):
     return d.iloc[0]
 
 # --------- Panel A: pair effect at chosen cutoff ---------
+def _row_at_cutoff(df: pd.DataFrame, direction: str, cutoff: float) -> pd.Series:
+    d = df[df["direction"] == direction]
+    if d.empty:
+        raise ValueError(f"No rows for direction='{direction}' in {set(df['direction'])}")
+    if "sd cutoff" not in d.columns:
+        # try legacy column name variations
+        for alt in ["sd_cutoff", "sd", "cutoff"]:
+            if alt in d.columns:
+                d = d.rename(columns={alt: "sd cutoff"})
+                break
+    idx = (d["sd cutoff"] - cutoff).abs().idxmin()
+    return d.loc[idx]
+
 def fig_pair_effect_at_cutoff(
     csv_path: str,
     direction: str,
     cutoff: float,
-    per_mouse_overlay: dict = None,   # {"s0_l1": (mean, lo, hi), ...}
-    per_mouse_props: dict  = None,     # {"s0_l1": [p_mouse1, ...], ...}
-    ref_key: str  = "ref",              # e.g. "l1_l2" or "s0_l1" — row highlight
+    per_mouse_overlay: dict = None,   # keys by canonical label (e.g., 'landmark_to_ctx') or legacy keys
+    per_mouse_props: dict  = None,    # optional: same keying as overlay, values are lists per mouse
+    ref_label: str  = None,           # e.g. 'landmark_to_landmark' (canonical) or a legacy key
     title: str  = None,
     save_path: str  = None,
-    xlim: tuple[float,float]  = None
+    xlim: tuple[float,float]  = None,
+    canonical: bool = True,           # use canonical display by default for pooled experiments
+    label_order: list[str] = None,    # explicit order of pair labels (canonical or legacy)
+    pretty_map: dict[str,str] = None  # optional pretty names per label
 ):
     """
-    Horizontal forest-style plot per pair:
-      - red dot + thick bar = GEE marginal prob ±95% CI
-      - thin blue bar + hollow square = per-mouse mean ±95% CI
-      - grey jittered dots = per-mouse proportions (optional)
-      - faint row highlight for reference pair (optional)
+    Makes a horizontal forest-style plot for all pair levels present in the CSV row:
+      - red dot + thick bar: GEE marginal prob ±95% CI
+      - thin blue bar + hollow square: per-mouse mean ±95% CI (if provided)
+      - grey dots: per-mouse proportions (if provided)
+      - shaded band + dotted line: reference level’s CI and mean (if ref_label given)
     """
     df = pd.read_csv(csv_path)
-    print(df)
     row = _row_at_cutoff(df, direction, cutoff)
 
-    # ----- collect data from CSV (GEE layer) -----
-    pair_labels_pretty = []
-    gee_prob = []
-    gee_lo = []
-    gee_hi = []
-    keys_in_plot_order = []
-    for pair_key, pretty in PAIR_SPECS:
-        keys_in_plot_order.append(pair_key)
-        pair_labels_pretty.append(pretty)
-        gee_prob.append(row[f"{pair_key}_coeff"])
-        gee_lo.append(row[f"{pair_key}_CI_low"])
-        gee_hi.append(row[f"{pair_key}_CI_hi"])
+    # ---- discover pair labels from CSV columns ----
+    # columns like: 'pair_<label>_coeff', 'pair_<label>_CI_low', 'pair_<label>_CI_hi'
+    pair_labels = []
+    for c in row.index:
+        m = re.match(r"^pair_(.+)_coeff$", str(c))
+        if m:
+            pair_labels.append(m.group(1))
+    pair_labels = sorted(set(pair_labels))
 
-    y_positions = np.arange(len(pair_labels_pretty))[::-1]  # top→bottom
+    # for legacy CSVs that used fixed short keys like 's0_l1_coeff'
+    if not pair_labels:
+        m2 = [re.match(r"^(s0_l1|l2_c1|c1_c2)_coeff$", str(c)) for c in row.index]
+        pair_labels = [m.group(1) for m in m2 if m]
+
+    if not pair_labels:
+        raise ValueError("Could not find any 'pair_<label>_coeff' columns in the CSV row.")
+
+    # optional label canonicalization (display side only)
+    if canonical:
+        disp_labels = [utils.canonical_from_pair_label(lab) for lab in pair_labels]
+    else:
+        disp_labels = pair_labels[:]  # keep as-is
+
+    # order labels for plotting
+    if label_order:
+        # keep only those present, in the requested order
+        ordered = [lab for lab in label_order if lab in disp_labels]
+    else:
+        ordered = sorted(disp_labels)
+
+    # build mapping from display label -> slug column prefix and vice versa
+    # slugs in CSV are *raw* labels (pre-canonical) under 'pair_<raw>_...'
+    disp_to_slug = {}
+    for raw in pair_labels:
+        disp = utils.canonical_from_pair_label(raw) if canonical else raw
+        disp_to_slug[disp] = utils.slug_for_cols(raw)  # 'pair_<raw>'
+
+    # ---- collect GEE layer from CSV (by display order) ----
+    pair_labels_pretty = []
+    gee_prob, gee_lo, gee_hi = [], [], []
+    for disp in ordered:
+        slug = disp_to_slug[disp]  # 'pair_<raw>'
+        pair_labels_pretty.append(pretty_map.get(disp, disp) if pretty_map else disp.replace("_", "→") if "_to_" in disp else disp)
+        gee_prob.append(float(row.get(f"{slug}_coeff", np.nan)))
+        gee_lo.append(float(row.get(f"{slug}_CI_low", np.nan)))
+        gee_hi.append(float(row.get(f"{slug}_CI_hi",  np.nan)))
+
+
+    pair_labels_pretty.append("ref")
+    slug="ref"
+    gee_prob.append(float(row.get(f"{slug}_coeff", np.nan)))
+    gee_lo.append(float(row.get(f"{slug}_CI_low", np.nan)))
+    gee_hi.append(float(row.get(f"{slug}_CI_hi",  np.nan)))
+
+    y_positions = np.arange(len(ordered)+1)[::-1] 
     gee_prob = np.asarray(gee_prob, float)
     gee_lo   = np.asarray(gee_lo, float)
     gee_hi   = np.asarray(gee_hi, float)
+    print(y_positions)
+    print(gee_prob)
 
-    # ----- figure -----
+    # ---- figure ----
     fig, ax = plt.subplots(figsize=(6.6, 4.2))
 
-    # Reference overlay: vertical band (CI) + dotted line (point)
-    if ref_key is not None and ref_key in keys_in_plot_order:
-        ref_p  = float(row[f"{ref_key}_coeff"])
-        ref_lo = float(row[f"{ref_key}_CI_low"])
-        ref_hi = float(row[f"{ref_key}_CI_hi"])
-        ax.axvspan(ref_lo, ref_hi, color="0.85", alpha=0.6, zorder=0, label="Para referencyjna (L1→L2) 95% CI")
-        ax.axvline(ref_p, linestyle=":", color="0.4", linewidth=1.2, zorder=1)
+    # Reference overlay (if provided and present)
+    if ref_label is not None:
+        ref_disp = utils.canonical_from_pair_label(ref_label) if canonical else ref_label
 
-    # Optional: per-mouse raw points (grey jitter)
+        rslug = "ref"
+        ref_p  = float(row.get(f"{rslug}_coeff", np.nan))
+        ref_lo = float(row.get(f"{rslug}_CI_low", np.nan))
+        ref_hi = float(row.get(f"{rslug}_CI_hi",  np.nan))
+        if np.isfinite(ref_p) and np.isfinite(ref_lo) and np.isfinite(ref_hi):
+            ax.axvspan(ref_lo, ref_hi, color="0.85", alpha=0.6, zorder=0, label="Ref 95% CI")
+            ax.axvline(ref_p, linestyle=":", color="0.4", linewidth=1.2, zorder=1)
+
+    # Optional: per-mouse raw points
     if per_mouse_props:
-        for yi, pair_key in zip(y_positions, keys_in_plot_order):
-            vals = per_mouse_props.get(pair_key)
+        for yi, disp in zip(y_positions, ordered):
+            vals = per_mouse_props.get(disp) or per_mouse_props.get(disp_to_slug[disp])  # tolerate either keying
             if vals:
                 vals = np.asarray(vals, float)
                 yjit = yi + (np.random.rand(len(vals)) - 0.5) * 0.16
                 ax.plot(vals, yjit, ".", alpha=0.45, color="0.5",
-                        label="Osobniki (proporcje)" if yi == y_positions[0] else None, zorder=2)
+                        label="Mice (props)" if yi == y_positions[0] else None, zorder=2)
 
-    # Optional: per-mouse mean ± CI (thin blue bar + hollow square)
+    # Optional: per-mouse mean ± CI
     if per_mouse_overlay:
-        for yi, pair_key in zip(y_positions, keys_in_plot_order):
-            if pair_key in per_mouse_overlay:
-                mean_pm, lo_pm, hi_pm = per_mouse_overlay[pair_key]
+        for yi, disp in zip(y_positions, ordered):
+            v = per_mouse_overlay.get(disp) or per_mouse_overlay.get(disp_to_slug[disp])
+            if v:
+                mean_pm, lo_pm, hi_pm = v
                 if np.isfinite(lo_pm) and np.isfinite(hi_pm):
                     ax.hlines(yi, lo_pm, hi_pm, linewidth=1.4, color="C0",
-                              label="Śr. po osobnikach 95% CI" if yi == y_positions[0] else None, zorder=3)
+                              label="Across-mouse mean ±95% CI" if yi == y_positions[0] else None, zorder=3)
                 if np.isfinite(mean_pm):
                     ax.plot([mean_pm], [yi], marker="s", mfc="white", mec="C0", mew=1.2, zorder=4)
 
     # GEE marginal: thick bar + red dot
     ax.hlines(y_positions, gee_lo, gee_hi, linewidth=3.0, color="C3", zorder=5)
-    ax.plot(gee_prob, y_positions, "o", color="C3", ms=6, label="GEE: est. marginalna 95% CI", zorder=6)
+    ax.plot(gee_prob, y_positions, "o", color="C3", ms=6, label="GEE EMM ±95% CI", zorder=6)
 
     # Cosmetics
     ax.set_yticks(y_positions)
     ax.set_yticklabels(pair_labels_pretty)
 
-    # tight x-lims from everything drawn (if not provided)
+    # x-lims
     if xlim is None:
         x_all = np.concatenate([gee_lo, gee_hi, gee_prob])
-        if ref_key is not None and ref_key in keys_in_plot_order:
-            x_all = np.append(x_all, [ref_lo, ref_hi, ref_p])
+        if ref_label is not None and (ref_disp in ordered):
+            x_all = np.append(x_all, [ref_p, ref_lo, ref_hi])
         if per_mouse_overlay:
             for (m, l, h) in per_mouse_overlay.values():
                 x_all = np.append(x_all, [m, l, h])
@@ -337,32 +402,27 @@ def fig_pair_effect_at_cutoff(
     else:
         ax.set_xlim(*xlim)
 
-    ax.set_xlabel("Prawdopodobieństwo")
-    if title is None:
-        title = f"EMM - model {direction}, próg {cutoff} rSD"
-    ax.set_title(title)
+    ax.set_xlabel("Probability")
+    ax.set_title(title or f"EMM — {direction}, cutoff {cutoff} rSD")
 
-    # Legend: unique labels, consistent order
+    # Simple legend (dedupe, fixed order)
     handles, labels = ax.get_legend_handles_labels()
-    seen, h_clean, l_clean = set(), [], []
-    # prefer order: ref band, per-mouse points, per-mouse mean, GEE
-    preferred = ["Para referencyjna L1→L2 95% CI", "Osobniki (proporcje)", "Śr. po osobnikach 95% CI", "GEE: est. marginalna (95% CI)"]
-    for pref in preferred:
+    seen, H, L = set(), [], []
+    for pref in ["Ref 95% CI", "Mice (props)", "Across-mouse mean ±95% CI", "GEE EMM ±95% CI"]:
         for h, lab in zip(handles, labels):
             if lab == pref and lab not in seen:
-                seen.add(lab); h_clean.append(h); l_clean.append(lab)
-    # add any remaining (unlikely)
+                seen.add(lab); H.append(h); L.append(lab)
     for h, lab in zip(handles, labels):
         if lab and lab not in seen:
-            seen.add(lab); h_clean.append(h); l_clean.append(lab)
-
-    if h_clean:
-        ax.legend(h_clean, l_clean, frameon=False, loc="lower right")
+            seen.add(lab); H.append(h); L.append(lab)
+    if H:
+        ax.legend(H, L, frameon=False, loc="lower right")
 
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
     return fig, ax
+
 
 
 
@@ -408,49 +468,67 @@ from scipy.stats import t
 
 def build_per_mouse_overlay(
     long_df: pd.DataFrame,
-    mouse_col: str,          # e.g. "mouse"
-    pair_col: str,           # e.g. "pair"  (values like "s0_landmark1", "landmark2_ctx1", "ctx1_ctx2")
-    outcome_col: str,        # binary 0/1 column for the direction you’re plotting, e.g. "y_up" or "y_down"
-    pair_key_map: dict       # maps values in pair_col -> keys used in your plots, e.g.
-                             # {"s0_landmark1":"s0_l1","landmark2_ctx1":"l2_c1","ctx1_ctx2":"c1_c2"}
+    mouse_col: str,           # e.g. "mouse"
+    pair_col: str,            # e.g. "pair" (values like "landmark2_to_ctx1", ...)
+    outcome_col: str,         # e.g. "y_up" or "y_down" (binary 0/1)
+    pair_key_map: dict = None,# legacy: map raw pair values -> short keys for 5-session plots
+    canonical: bool = False,  # if True, aggregate by canonical pairs ('landmark_to_ctx', ...)
+    pair_order: list[str] = None  # optional order of labels to return
 ):
     """
-    Returns: dict {plot_key: (mean_prop_across_mice, CI_low, CI_high)} for each pair,
-    where the CI is a t-based 95% CI across mice (mean of *per-mouse* proportions).
+    Returns: dict {plot_key: (mean_prop_across_mice, CI_low, CI_high)}.
+
+    Behavior:
+      - If canonical=True: pairs are collapsed to canonical labels automatically.
+      - Else if pair_key_map is provided: keys come from pair_key_map (legacy 5-session).
+      - Else: keys are the unique raw pair values in pair_col.
     """
-    # keep only rows where outcome is 0/1
     d = long_df[[mouse_col, pair_col, outcome_col]].dropna().copy()
 
-    # per-mouse proportion within each pair
-    # (mean of the binary outcome per mouse per pair)
+    if canonical:
+        d["_plot_key"] = d[pair_col].astype(str).map(utils.canonical_from_pair_label)
+    elif pair_key_map is not None:
+        d["_plot_key"] = d[pair_col].map(pair_key_map).astype("object")
+    else:
+        d["_plot_key"] = d[pair_col].astype(str)
+
+    # remove rows we couldn't map
+    d = d[~d["_plot_key"].isna()].copy()
+
+    # per-mouse mean within each (pair key)
     pm = (
-        d.groupby([pair_col, mouse_col], observed=True)[outcome_col]
+        d.groupby(["_plot_key", mouse_col], observed=True)[outcome_col]
          .mean()
          .rename("prop")
     )
 
-    # aggregate across mice (per pair): mean, sd, n
     agg = (
         pm.reset_index()
-          .groupby(pair_col, observed=True)["prop"]
+          .groupby("_plot_key", observed=True)["prop"]
           .agg(["mean", "std", "count"])
     )
-    # t-based CI across mice (df = n-1)
-    # handle sd=NaN (single mouse) gracefully → CI becomes NaN
+
+    # t-based CI across mice
     dfree = agg["count"] - 1
     se = agg["std"] / np.sqrt(agg["count"])
-    tcrit = t.ppf(0.975, dfree.replace(0, np.nan))  # avoid df=0
+    tcrit = t.ppf(0.975, dfree.replace(0, np.nan))
     ci_lo = agg["mean"] - tcrit * se
     ci_hi = agg["mean"] + tcrit * se
 
-    # map to your plotting keys
+    # choose output order
+    keys = list(agg.index.astype(str))
+    if pair_order:
+        # keep only those we have, in requested order
+        keys = [k for k in pair_order if k in keys]
+    else:
+        keys.sort()
+
     out = {}
-    for pair_val, row in agg.iterrows():
-        key = pair_key_map.get(pair_val)
-        if key is not None:
-            out[key] = (float(row["mean"]),
-                        float(ci_lo.loc[pair_val]) if np.isfinite(ci_lo.loc[pair_val]) else np.nan,
-                        float(ci_hi.loc[pair_val]) if np.isfinite(ci_hi.loc[pair_val]) else np.nan)
+    for key in keys:
+        m = float(agg.loc[key, "mean"])
+        lo = float(ci_lo.loc[key]) if np.isfinite(ci_lo.loc[key]) else np.nan
+        hi = float(ci_hi.loc[key]) if np.isfinite(ci_hi.loc[key]) else np.nan
+        out[key] = (m, lo, hi)
     return out
 
 

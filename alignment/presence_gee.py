@@ -20,10 +20,185 @@ from scipy import stats
 import presence_plots as pp
 #%% config
 
-SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/ctx_landmark.yaml", idx=0)
+SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/context_only.yaml", idx=0)
 
 #%%
 all_mice.columns
+#%%
+
+
+import numpy as np
+import pandas as pd
+from scipy.stats import ttest_rel
+
+def diagnose_alignment_between_pipelines(
+    df_counts: pd.DataFrame,
+    long_df: pd.DataFrame,
+    *,
+    mode: str = "const",            # "const" or "direction"
+    count_keys=("mouse_id","Pair"), # df_counts keys
+    long_keys=("mouse","pair"),     # long_df keys
+    weight_col=None                 # e.g., "w_paired" if present
+):
+    """
+    Compare df_counts (mouse×pair aggregate) vs. long_df (row-level) to ensure
+    both approaches operate on the *same* data and yield the *same* per-mouse DVs.
+
+    mode="const"     -> uses const / n
+    mode="direction" -> uses on / (on+off), dropping mouse×pair with 0 changers
+    """
+
+    # --- 0) Prepare keys and basic integrity
+    dc_mouse, dc_pair = count_keys
+    lg_mouse, lg_pair = long_keys
+
+    need_dc = {dc_mouse, dc_pair, "n", "on", "off", "const"}
+    miss_dc = [c for c in need_dc if c not in df_counts.columns]
+    if miss_dc:
+        raise ValueError(f"df_counts missing columns: {miss_dc}")
+
+    need_lg = {lg_mouse, lg_pair, "y_const", "y_on", "y_off"}
+    miss_lg = [c for c in need_lg if c not in long_df.columns]
+    if miss_lg:
+        raise ValueError(f"long_df missing columns: {miss_lg}")
+
+    # Normalize dtypes for keys (strings are safest)
+    dc = df_counts.copy()
+    lg = long_df.copy()
+    dc[dc_mouse] = dc[dc_mouse].astype(str)
+    dc[dc_pair]  = dc[dc_pair].astype(str)
+    lg[lg_mouse] = lg[lg_mouse].astype(str)
+    lg[lg_pair]  = lg[lg_pair].astype(str)
+
+    # --- 1) Rebuild mouse×pair counts from long_df
+    long_counts = (lg
+        .groupby([lg_mouse, lg_pair])
+        .agg(on=("y_on","sum"), off=("y_off","sum"), const=("y_const","sum"), n=("y_const","size"))
+        .sort_index()
+        .rename_axis(index={lg_mouse: dc_mouse, lg_pair: dc_pair})
+    )
+
+    dc_counts = (dc
+        .groupby([dc_mouse, dc_pair])[["n","on","off","const"]]
+        .sum()
+        .sort_index()
+    )
+
+    # --- 2) Join counts and compute deltas
+    comp = dc_counts.join(long_counts, how="outer", lsuffix="_dc", rsuffix="_lg").fillna(0)
+    for c in ["n","on","off","const"]:
+        comp[f"Δ_{c}"] = comp[f"{c}_dc"] - comp[f"{c}_lg"]
+
+    # Mismatch summaries
+    n_mismatch = (comp[["Δ_n","Δ_on","Δ_off","Δ_const"]] != 0).any(axis=1).sum()
+    print(f"[counts] rows compared: {len(comp)}  |  rows with any mismatch: {n_mismatch}")
+    if n_mismatch:
+        print(comp.loc[(comp[["Δ_n","Δ_on","Δ_off","Δ_const"]] != 0).any(axis=1)]
+                  .head(20))
+
+    # Totals check
+    totals = comp[[f"{x}_dc" for x in ["n","on","off","const"]] + [f"{x}_lg" for x in ["n","on","off","const"]]].sum()
+    print("\n[totals]")
+    print(totals)
+
+    # --- 3) Build per-mouse DVs from BOTH sources and compare
+    # From df_counts
+    tidy_dc = dc[[dc_mouse, dc_pair, "n","on","off","const"]].copy()
+    tidy_dc["prop_const"] = tidy_dc["const"] / tidy_dc["n"]
+    den_chg_dc = tidy_dc["on"] + tidy_dc["off"]
+    tidy_dc["prop_dir"]   = np.where(den_chg_dc > 0, tidy_dc["on"] / den_chg_dc, np.nan)
+
+    # From long_df
+    tidy_lg = long_counts.reset_index()
+    tidy_lg["prop_const"] = tidy_lg["const"] / tidy_lg["n"]
+    den_chg_lg = tidy_lg["on"] + tidy_lg["off"]
+    tidy_lg["prop_dir"]   = np.where(den_chg_lg > 0, tidy_lg["on"] / den_chg_lg, np.nan)
+
+    # Align for comparison
+    key = [dc_mouse, dc_pair]
+    merged = pd.merge(
+        tidy_dc[key + ["prop_const","prop_dir"]],
+        tidy_lg[key + ["prop_const","prop_dir"]],
+        on=key, how="outer", suffixes=("_dc","_lg")
+    )
+
+    # Absolute diffs
+    merged["absdiff_const"] = (merged["prop_const_dc"] - merged["prop_const_lg"]).abs()
+    merged["absdiff_dir"]   = (merged["prop_dir_dc"]   - merged["prop_dir_lg"]).abs()
+
+    print("\n[per-mouse×pair proportion diffs] (NaNs = missing on one side)")
+    print(" max |Δ const|   :", np.nanmax(merged["absdiff_const"].to_numpy()))
+    print(" max |Δ dir  |   :", np.nanmax(merged["absdiff_dir"].to_numpy()))
+    bad_prop = merged[(merged["absdiff_const"] > 1e-12) | (merged["absdiff_dir"] > 1e-12)]
+    if not bad_prop.empty:
+        print(bad_prop.head(20))
+
+    # --- 4) “Complete-case” mice for the DV you plan to t-test
+    if mode == "const":
+        dv_dc = "prop_const_dc"
+        dv_lg = "prop_const_lg"
+    elif mode == "direction":
+        dv_dc = "prop_dir_dc"
+        dv_lg = "prop_dir_lg"
+    else:
+        raise ValueError("mode must be 'const' or 'direction'")
+
+    wide_dc = merged.pivot_table(index=dc_mouse, columns=dc_pair, values=dv_dc, aggfunc="mean")
+    wide_lg = merged.pivot_table(index=dc_mouse, columns=dc_pair, values=dv_lg, aggfunc="mean")
+
+    cc_dc = set(wide_dc.dropna(axis=0, how="any").index)
+    cc_lg = set(wide_lg.dropna(axis=0, how="any").index)
+    print("\n[complete-case mice]")
+    print(" df_counts :", sorted(cc_dc))
+    print(" long_df   :", sorted(cc_lg))
+    print(" symmetric diff:", sorted(cc_dc ^ cc_lg))
+
+    # --- 5) Paired t-test parity on the SAME mice/pairs, from both sources
+    pairs_avail = [c for c in wide_dc.columns if c in wide_lg.columns]
+    if len(pairs_avail) >= 2:
+        a, b = pairs_avail[:2]
+        common_mice = sorted(cc_dc & cc_lg)
+
+        wd_dc = wide_dc.loc[common_mice, [a,b]]
+        wd_lg = wide_lg.loc[common_mice, [a,b]]
+
+        def paired_stats(wide):
+            diffs = (wide[a] - wide[b]).dropna()
+            t, p = ttest_rel(wide[a], wide[b], nan_policy="omit")
+            return {"n": int(diffs.size),
+                    "mean_diff": float(diffs.mean()),
+                    "sd": float(diffs.std(ddof=1)),
+                    "t": float(t), "p": float(p)}
+
+        print(f"\n[paired t-test parity on '{mode}'] pairs: {a} vs {b} (common mice only)")
+        print(" from df_counts:", paired_stats(wd_dc))
+        print(" from long_df  :", paired_stats(wd_lg))
+
+    # --- 6) (Optional) check mouse×pair weight sums
+    if weight_col and weight_col in long_df.columns:
+        wsum = (lg.groupby([lg_mouse, lg_pair])[weight_col].sum()
+                  .rename("w_sum").reset_index())
+        print("\n[weight sums per (mouse,pair)] min/max/unique:")
+        print(wsum["w_sum"].describe())
+        badw = wsum[(wsum["w_sum"] < 0.9999) | (wsum["w_sum"] > 1.0001)]
+        if not badw.empty:
+            print("! groups with weight sum != 1 (head):")
+            print(badw.head(20))
+
+    return {"counts_comparison": comp, "proportion_merge": merged,
+            "wide_dc": wide_dc, "wide_lg": wide_lg}
+
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+    out_const = diagnose_alignment_between_pipelines(
+        df_counts, long_mice, mode="const",
+        count_keys=("mouse_id","Pair"),
+        long_keys=("mouse","pair"),
+        weight_col="w_paired"  # or None if you don't have weights
+    )
+
+
+
+
     
 #%%
 pairs = list(zip(SESSIONS, SESSIONS[1:]))
@@ -237,7 +412,7 @@ def rm_anova_one_factor_wide(df_long: pd.DataFrame,
 def run_two_anovas(df_counts: pd.DataFrame):
     tidy = build_stability_direction_table(df_counts)
     tidy = tidy.rename(columns={"mouse_id": "mouse", "Pair": "transition"})  # align names
-    print(tidy.head(10))
+    print(tidy.head(22))
     # ANOVA #1: Stability across transitions
     complete, res_stability = rm_anova_one_factor_wide(tidy, dv="prop_const",
                                              mouse_col="mouse", within_col="transition")
@@ -373,6 +548,7 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         
         print("\nNormality checks:")
         print(res["normality"])
+
 
 
 #%%

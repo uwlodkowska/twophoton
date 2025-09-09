@@ -5,7 +5,7 @@ import patsy as pt
 from scipy import stats
 from scipy.stats import norm, f as fdist
 from scipy.special import expit as logistic
-
+import utils
 # ------------------------------
 # Core helpers
 # ------------------------------
@@ -362,7 +362,7 @@ def summarize_pairs_delta_and_or(
     zcrit = t.ppf(1 - alpha/2, df_t) if df_t is not None else norm.ppf(1 - alpha/2)
     stat_name = f"t (df={int(df_t)})" if df_t is not None else "z"
 
-    for lab in pair_labels:
+    for lab, ref_label in pair_labels:
         # Δp + SE + p (marginal, per your averaging/fixed scheme)
         d = delta_prob_test(
             res, df, lab, ref_label,
@@ -410,16 +410,167 @@ def summarize_pairs_delta_and_or(
             "OR_hi": OR_hi,
             "p_logit": float(p_logit),
         })
+    # for lab, ref_label in [pair_labels]:
+    #     # Δp + SE + p (marginal, per your averaging/fixed scheme)
+    #     d = delta_prob_test(
+    #         res, df, lab, ref_label,
+    #         formula=formula, df_t=df_t,
+    #         averaging=averaging, mouse_col=mouse_col,
+    #         weights=weights, set_fixed=set_fixed
+    #     )
+    #     delta, se, stat, p_delta = float(d["delta"]), float(d["se"]), float(d["stat"]), float(d["p"])
+    #     ci_lo, ci_hi = delta - zcrit*se, delta + zcrit*se
+
+    #     # EMM probabilities for each level (useful to report)
+    #     p_pair, _ = emm_pair(
+    #         res, df, lab, ref_label, formula=formula,
+    #         averaging=averaging, mouse_col=mouse_col,
+    #         weights=weights, set_fixed=set_fixed
+    #     )
+    #     p_ref, _  = emm_pair(
+    #         res, df, ref_label, ref_label, formula=formula,
+    #         averaging=averaging, mouse_col=mouse_col,
+    #         weights=weights, set_fixed=set_fixed
+    #     )
+
+    #     # Logit contrast → OR (+ CI on logit scale, exponentiated)
+    #     est_logit, se_logit, z_logit, p_logit = contrast_vs_ref_logit(res, lab, ref_label)
+    #     OR    = float(np.exp(est_logit))
+    #     OR_lo = float(np.exp(est_logit - zcrit*se_logit)) if np.isfinite(se_logit) else np.nan
+    #     OR_hi = float(np.exp(est_logit + zcrit*se_logit)) if np.isfinite(se_logit) else np.nan
+
+    #     rows.append({
+    #         "pair": lab,
+    #         "ref": ref_label,
+    #         # probability-scale estimand
+    #         "p_ref": float(p_ref),
+    #         "p_pair": float(p_pair),
+    #         "delta": delta,
+    #         "se_delta": se,
+    #         "ci_lo": ci_lo,
+    #         "ci_hi": ci_hi,
+    #         "stat": stat,
+    #         "stat_name": stat_name,
+    #         "p_raw": p_delta,
+    #         # logit-scale (conditional) estimand
+    #         "OR": OR,
+    #         "OR_lo": OR_lo,
+    #         "OR_hi": OR_hi,
+    #         "p_logit": float(p_logit),
+    #     })
+    
+    return pd.DataFrame(rows)
 
 
 def add_holm(df, p_col="p_delta", alpha=0.05):
     if len(df) <= 1:
         df = df.copy()
         df["p_holm"] = df[p_col]
-        df["reject_holm"] = False
+        df["reject_holm"] = df[p_col] < alpha
         return df
     reject, p_holm, _, _ = multipletests(df[p_col], method="holm", alpha=alpha)
     df = df.copy()
     df["p_holm"] = p_holm
     df["reject_holm"] = reject
     return df
+
+def prob_wald_multi(
+    res,
+    df,
+    *,
+    formula,
+    pair_labels,           # iterable of pairs to compare jointly vs ref
+    ref_label,
+    averaging="mouse",
+    mouse_col="mouse",
+    weights=None,
+    set_fixed=None,
+    df2=None               # default = (#clusters - 1)
+):
+    """
+    q-df Wald F-test on the PROBABILITY scale for the vector of contrasts
+    Δ = [P(pair_j) - P(ref)]_{j=1..q}, with small-cluster df2 = (#mice - 1).
+
+    Returns:
+      {
+        "F": float, "df1": q, "df2": df2, "p": float,
+        "rows": DataFrame with per-contrast delta and SE
+      }
+    """
+    pair_labels = list(set([x[0] for x in pair_labels]))
+    d = _ensure_pair_levels(df, list(pair_labels) + [ref_label], pair_col="pair")
+    if df2 is None:
+        df2 = max(int(d[mouse_col].nunique()) - 1, 1)
+
+    # Collect Δp and gradient for each contrast using your emm_pair
+    deltas = []
+    grads  = []
+    rows   = []
+    Vb = np.asarray(res.cov_params(), dtype=float)
+
+    for lab in pair_labels:
+        p_pair, g_pair = emm_pair(
+            res, d, lab, ref_label, formula=formula,
+            averaging=averaging, mouse_col=mouse_col,
+            weights=weights, set_fixed=set_fixed
+        )
+        p_ref,  g_ref  = emm_pair(
+            res, d, ref_label, ref_label, formula=formula,
+            averaging=averaging, mouse_col=mouse_col,
+            weights=weights, set_fixed=set_fixed
+        )
+        deltas.append(p_pair - p_ref)
+        g_delta = (g_pair - g_ref).reshape(-1, 1)  # (p,1)
+        grads.append(g_delta)
+
+        var_j = float(g_delta.T @ Vb @ g_delta)
+        se_j  = (max(var_j, 0.0)) ** 0.5
+        rows.append({"pair": lab, "delta": float(deltas[-1]), "se": se_j,
+                     "p_pair": float(p_pair), "p_ref": float(p_ref)})
+
+    # Assemble G (p x q) and D (q x 1)
+    G = np.hstack(grads)                       # (p, q)
+    D = np.array(deltas, dtype=float).reshape(-1, 1)  # (q, 1)
+
+    # Wald statistic: W = D' (G' Vb G)^(-1) D  ~ chi^2_q  → F = W/q with df2
+    V_D = G.T @ Vb @ G                         # (q, q)
+    try:
+        inv = np.linalg.inv(V_D)
+    except np.linalg.LinAlgError:
+        inv = np.linalg.pinv(V_D)
+    W = float(D.T @ inv @ D)
+    q = len(pair_labels)
+    F = W / q
+    p = 1.0 - fdist.cdf(F, q, df2)
+
+    result =  {
+        "F": F,
+        "df1": q,
+        "df2": int(df2),
+        "p": float(p),
+        #"rows": pd.DataFrame(rows, columns=["pair","delta","se","p_pair","p_ref"]),
+        "mode" : "set_fixed" if set_fixed is not None else "mouse_avg"
+    }
+    
+    cols = ["F", "df1", "df2","p", "mode"]
+    result = pd.DataFrame(result, columns =cols, index = [0])
+    return result
+
+
+
+def _ensure_pair_levels(df, levels, pair_col="pair"):
+    """
+    Make sure 'pair' is categorical and includes all 'levels' so EMMs
+    can be evaluated even if some levels are absent in df after filtering.
+    """
+    d = df.copy()
+    if pair_col not in d.columns:
+        raise KeyError(f"{pair_col!r} not in df")
+    if not pd.api.types.is_categorical_dtype(d[pair_col]):
+        d[pair_col] = d[pair_col].astype("category")
+    cats = list(d[pair_col].cat.categories)
+    add  = [lv for lv in levels if lv not in cats]
+    if add:
+        d[pair_col] = d[pair_col].cat.set_categories(cats + add, ordered=False)
+    return d
+

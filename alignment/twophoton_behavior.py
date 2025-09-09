@@ -40,3 +40,6 @@ for m in behav.columns:
 #plt.xticks(np.arange(19))
 plt.title("Accuracy over days")
 plt.legend()
+#%%
+
+dict_df = pd.read_csv("/home/ula/Downloads/rstudio_Ula/ABA_brain_regions.csv")

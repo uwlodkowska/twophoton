@@ -67,6 +67,13 @@ def pair_emm_and_grad(res, df, formula, pair_label, ref_label,
     all_levels = list(d["pair"].cat.categories)
     if pair_label not in all_levels:
         raise ValueError(f"Requested pair {pair_label!r} not in categories {all_levels}")
+
+    have_pair = set(df.loc[df["pair"] == pair_label, mouse_col].unique())
+    have_ref  = set(df.loc[df["pair"] == ref_label,  mouse_col].unique())
+    keep_mice = have_pair & have_ref
+    if len(keep_mice) == 0:
+        raise ValueError(f"No mice observed for both {pair_label!r} and {ref_label!r}")
+    d = d[d[mouse_col].isin(list(keep_mice))].copy()
     d["pair"] = pd.Categorical([pair_label]*len(d), categories=all_levels)
 
     # Build the same design used at fit-time; keep same column order as model
@@ -80,13 +87,23 @@ def pair_emm_and_grad(res, df, formula, pair_label, ref_label,
 
     # Averaging & gradient
     if weights is not None:
+        
         w = np.asarray(weights, dtype=float).reshape(-1)
+        # if len(w) != len(df):
+        #     raise ValueError("weights must match df length before filtering")
+        pos = df.index.get_indexer(d.index)
+        w = w[pos]
         if w.shape[0] != len(d):
             raise ValueError("weights length must equal len(df)")
+
         w = w / w.sum()
+            
+
         p_bar = float((w * p).sum())
         grad  = (w[:,None] * (p*(1-p))[:,None] * Xv).sum(axis=0)
         return p_bar, grad
+
+
 
     if averaging == "row":
         p_bar = float(p.mean())
@@ -807,3 +824,184 @@ def per_mouse_raw_contrast(
         tbl["z_mad"] = (tbl["diff"] - med) / mad if mad > 0 else np.nan
         tbl["flag_mad"] = tbl["z_mad"].abs() > 3.0
     return tbl
+
+
+def emm_prob_observed(res, df_sub, formula, pair_label, mouse_col="mouse", set_fixed=None):
+    """
+    Compute mouse-balanced EMM (probability scale) for a given pair,
+    keeping observed covariates for each row/mouse.
+
+    res        : fitted statsmodels GEE result
+    df_sub     : subset dataframe (only mice to include)
+    formula    : Patsy formula string used at fit
+    pair_label : which pair to predict
+    mouse_col  : column with mouse IDs
+    set_fixed  : optional dict of covariates to fix to a value (overrides df_sub)
+    """
+    d = df_sub.copy()
+
+    # make sure 'pair' is categorical with full category set
+    if not pd.api.types.is_categorical_dtype(d["pair"]):
+        d["pair"] = pd.Categorical(d["pair"])
+    if pair_label not in d["pair"].cat.categories:
+        d["pair"] = d["pair"].cat.add_categories([pair_label])
+
+    # override covariates if requested
+    if set_fixed:
+        for k, v in set_fixed.items():
+            d[k] = v
+
+    # set target pair, keep other covariates as observed
+    d.loc[:, "pair"] = pair_label
+
+    # build design aligned to fitted model
+    names = list(res.model.exog_names)
+    X = pt.dmatrix(formula, d, return_type="dataframe", NA_action="raise") \
+          .reindex(columns=names, fill_value=0.0)
+    eta = X.values @ res.params.to_numpy()
+    p   = 1.0 / (1.0 + np.exp(-eta))
+
+    # mouse-balanced mean probability
+    per_mouse = (pd.DataFrame({"m": d[mouse_col].to_numpy(), "p": p})
+                   .groupby("m")["p"].mean())
+    return float(per_mouse.mean()), per_mouse.sort_index()
+#%%
+
+
+import numpy as np, pandas as pd, patsy as pt
+
+def _mice_for_contrast(df, pair_a, pair_b, mouse_col="mouse"):
+    A = set(df.loc[df["pair"]==pair_a, mouse_col].unique())
+    B = set(df.loc[df["pair"]==pair_b, mouse_col].unique())
+    return sorted(A & B)
+
+def _emm_fixed_obs_and_grad(res, d, formula, pair_label, set_fixed, mouse_col="mouse"):
+    # keep observed rows, but overwrite specified covariates and pair
+    d = d.copy()
+    if not pd.api.types.is_categorical_dtype(d["pair"]):
+        d["pair"] = pd.Categorical(d["pair"])
+    if pair_label not in d["pair"].cat.categories:
+        d["pair"] = d["pair"].cat.add_categories([pair_label])
+    d.loc[:, "pair"] = pair_label
+    if set_fixed:
+        for k,v in set_fixed.items():
+            d[k] = v
+
+    names = list(res.model.exog_names)
+    X = pt.dmatrix(formula, d, return_type="dataframe", NA_action="raise") \
+           .reindex(columns=names, fill_value=0.0).values
+    beta = res.params.to_numpy()
+    eta  = X @ beta
+    p    = 1.0/(1.0+np.exp(-eta))
+
+    # mouse-balanced mean + matching gradient
+    mice, inv = np.unique(d[mouse_col].to_numpy(), return_inverse=True)
+    n_m = len(mice)
+    p_m = np.zeros(n_m)
+    G_m = np.zeros((n_m, X.shape[1]))
+    for m_idx in range(n_m):
+        idx = (inv == m_idx)
+        pm  = p[idx]
+        Xm  = X[idx,:]
+        p_m[m_idx]   = pm.mean()
+        G_m[m_idx,:] = ((pm*(1-pm))[:,None] * Xm).mean(axis=0)
+
+    p_bar = float(p_m.mean())
+    grad  = G_m.mean(axis=0)
+    return p_bar, grad
+
+def contrast_same_mice_refit_fixed(fit_callable, df, formula, pair_alt, pair_ref,
+                                   set_fixed=None, mouse_col="mouse"):
+    # 1) same-mice subset for this contrast
+    keep = _mice_for_contrast(df, pair_alt, pair_ref, mouse_col)
+    if not keep:
+        raise ValueError("No mice have both pairs for this contrast.")
+    dsub = df[df[mouse_col].isin(keep)].copy()
+
+    # 2) REFIT on that subset (captures β-sensitivity without m13, etc.)
+    _,res = fit_callable(dsub)
+
+    # 3) EMMs at fixed covariates
+    p_alt, g_alt = _emm_fixed_obs_and_grad(res, dsub, formula, pair_alt, set_fixed, mouse_col)
+    p_ref, g_ref = _emm_fixed_obs_and_grad(res, dsub, formula, pair_ref, set_fixed, mouse_col)
+
+
+    # Delta-method on prob. scale using NumPy
+    g = (g_alt - g_ref).reshape(-1)                 # shape (p,)
+    V = res.cov_params()
+    V = V.to_numpy() if hasattr(V, "to_numpy") else np.asarray(V)
+    if V.shape[0] != g.shape[0]:
+        raise ValueError(f"grad len {g.shape[0]} != cov shape {V.shape}")
+    var = float(g @ V @ g)     
+    se  = np.sqrt(max(var, 0.0))
+    diff = p_alt - p_ref
+    return {
+        "kept_mice": keep,
+        "n_mice": len(keep),
+        "diff": diff,
+        "se": se,
+        "ci95": (diff - 1.96*se, diff + 1.96*se),
+        "res": res,
+    }
+from math import isfinite
+import numpy as np
+from scipy.stats import norm, t as student_t
+
+def add_significance_to_contrast(result_dict, alpha=0.05, small_sample=True):
+    """
+    result_dict must contain: {'diff': float, 'se': float, 'kept_mice': [...]}.
+    Returns the same dict with Wald stats, p-values, and CIs added.
+    """
+    diff = float(result_dict["diff"])
+    se   = float(result_dict["se"])
+    m    = int(len(result_dict["kept_mice"]))
+    if se <= 0 or not isfinite(se):
+        # degenerate case
+        result_dict.update({
+            "stat": np.inf if diff != 0 else 0.0,
+            "df": m - 1,
+            "p_norm": 0.0 if diff != 0 else 1.0,
+            "p_t": 0.0 if (diff != 0 and m > 1) else 1.0,
+            "ci95_norm": (diff, diff),
+            "ci95_t": (diff, diff),
+        })
+        return result_dict
+
+    stat = diff / se
+    df   = max(m - 1, 1)  # conservative small-sample df
+
+    # Two-sided p-values
+    p_norm = 2 * norm.sf(abs(stat))
+    p_t    = 2 * student_t.sf(abs(stat), df=df)
+
+    # 95% CIs
+    zcrit  = norm.ppf(0.975)
+    tcrit  = student_t.ppf(0.975, df=df)
+    ci95_norm = (diff - zcrit * se, diff + zcrit * se)
+    ci95_t    = (diff - tcrit * se, diff + tcrit * se)
+
+    result_dict.update({
+        "stat": stat,
+        "df": df,
+        "p_norm": p_norm,
+        "p_t": p_t if small_sample else p_norm,   # pick which you’ll report
+        "ci95_norm": ci95_norm,
+        "ci95_t": ci95_t,
+    })
+    return result_dict
+
+
+def _signed_log(x):
+    x = np.asarray(x, float)
+    return np.sign(x) * np.log1p(np.abs(x))
+
+def _winsor_per_mouse(df, col, mouse_col="mouse", lo=0.5, hi=99.5):
+    qlo, qhi = lo/100.0, hi/100.0
+
+    def _clip(s: pd.Series) -> pd.Series:
+        v = s.dropna()
+        if v.empty:                
+            return s               
+        lo_v, hi_v = v.quantile([qlo, qhi])
+        return s.clip(lower=lo_v, upper=hi_v)
+    return df.groupby(mouse_col)[col].transform(_clip)

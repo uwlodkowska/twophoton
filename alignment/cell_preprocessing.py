@@ -224,17 +224,28 @@ def calculate_background_for_cell(row, img, distance, suff):
     valid_variants = [ coords for coords in shift_variants if all(0 <= c < bounds[i] for i, c in enumerate(coords))]
 
     brightness_values = np.array([calculate_intensity(x, y, z, img) for x, y, z in valid_variants])
-    return min(brightness_values)
+    bg_min = brightness_values.min()
+    bg_med = np.median(brightness_values)
+    bg_rstd = 1.4826 * np.median(np.abs(brightness_values - bg_med))
+    cell_val = calculate_intensity(*base_coords, img)
+    
+    if bg_rstd == 0:
+        snr_robust = np.nan
+    else:
+        snr_robust = (cell_val - bg_med) / bg_rstd
+    return bg_min, snr_robust
 
 def find_background(df, img, suff="", distance = 10):
     """Optimize the positions of centroids using parallel processing."""
     integral_img = calculate_integral_image(img)
-
-    df[f"background{suff}"] = df.apply(calculate_background_for_cell,img = integral_img, 
-                                                       distance = distance,
-                                                       suff = suff,
-                                                       axis = 1)   
-
+    df[[f"background{suff}", f"snr_robust{suff}"]] = df.apply(
+        calculate_background_for_cell,
+        img=integral_img,
+        distance=distance,
+        suff=suff,
+        axis=1,
+        result_type="expand"
+    )
 
     return df
 
@@ -396,7 +407,6 @@ def intensity_depth_detrend(
         # per-bin scales
         sigma_I = _robust_scale(residI)  # intensity MAD
         sigma_B = _robust_scale(residB)  # background MAD
-        mean_B  = pd.Series(residB).groupby(z_bin).transform(lambda r: np.nanmean(r)).astype(float)
 
         # standardized outputs
         int_z  = residI / sigma_I.values     # your existing SD scale
@@ -411,6 +421,7 @@ def intensity_depth_detrend(
         #out[f"is_dim_by_bg_{sid}"] = residI < (mean_B.values - k_dim * sigma_B.values)
 
         bg_mean = df.groupby(z_bin)[f"background_{sid}"].transform("mean")
+
         bg_std  = df.groupby(z_bin)[f"background_{sid}"].transform("std")
         threshold = bg_mean + 3.0 * bg_std
         out[f"is_dim_by_bg_{sid}"] = (out[Icol] < threshold)

@@ -14,7 +14,7 @@ import pandas as pd
 
 #%% config
 
-config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/multisession.yaml"
+config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/context_only.yaml"
 
 with open(config_file, "r") as file:
     config = yaml.safe_load(file)
@@ -28,7 +28,7 @@ BGR_DIR = config["experiment"]["background_dir"]
 RESULT_PATH = config["experiment"]["result_path"]
 
 regions = config["experiment"]["regions"]
-group_session_order = ["ctx1", "ctx2", "landmark1", "landmark2"]#config["experiment"]["session_order"][1]
+group_session_order = config["experiment"]["session_order"][0]
 
 optimized_fname = config["filenames"]["cell_data_opt_template"]
 pooled_cells_fname = config["filenames"]["pooled_cells"]
@@ -37,7 +37,8 @@ pooled_cells_fname = config["filenames"]["pooled_cells"]
 
 regions = [[13,2],[14,1], [16, 1], [8,1], [20,2], [2,2], [5,1], [10,1], [11,1]]
 regions = [[1,2], [3,2],[4,1], [7,2], [9,1],[12,1], [17,1], [18,2]]
-regions = [[11,2],[3,1]]
+#%%[112,2],
+regions = [[10,1], [103,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1]]
 
 #%% reading  and prepping detection results from icy
 
@@ -72,7 +73,10 @@ for mouse, region in regions:
         img = utils.read_image(mouse, region, sid, config)
         df_reseg = cp.optimize_centroids(df_reseg, img, suff=f"_{sid}", tolerance=3, update_coords=False)
     df_reseg.to_csv(RESULT_PATH+pooled_cells_fname.format(mouse, region))
-   
+    
+#%%
+df_reseg.to_csv(RESULT_PATH+pooled_cells_fname.format(mouse, region))
+'''   
 #%% here i'm looking at how cells detected in session differ from the ones undetected in terms of fluorescence in that session
 df = utils.read_pooled_with_background(1, 1, config)
 plotting.session_detection_vs_background(df, group_session_order, sub_bgr = True)
@@ -402,3 +406,4 @@ axes[1].annotate("*",
 axes[0].set_ylim(0.01, 0.09)  # adjust min/max if needed
 axes[1].set_ylim(0.01, 0.09)
 plt.show()
+'''
