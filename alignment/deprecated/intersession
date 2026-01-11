@@ -1,9 +1,0 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Feb 17 20:27:56 2023
-
-@author: ula
-"""
-
-def identify_persistent_cells(mouse, region, sessions):
