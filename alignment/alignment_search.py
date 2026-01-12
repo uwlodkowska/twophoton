@@ -7,7 +7,7 @@ import tifffile, csv
 import sys
 import yaml
 
-#%%
+
 config_file = sys.argv[1] if len(sys.argv) > 1 else "config_files/context_only.yaml"
 
 with open(config_file, "r") as file:
@@ -27,7 +27,6 @@ alignment_filenames = config["alignment_filenames"]
 def calculate_cropped_diff(substack1, substack2, x, y):
     xdif = min(substack1.shape[1], substack2.shape[1])-abs(x);
     ydif = min(substack1.shape[2], substack2.shape[2])-abs(y);
-    
 
     sub1_tmp = substack1[:,max(0,x):max(0,x)+xdif,max(0,y):max(0,y)+ydif]
     sub2_tmp = substack2[:,max(0,-x):max(0,-x)+xdif,max(0,-y):max(0,-y)+ydif]
@@ -37,7 +36,7 @@ def calculate_cropped_diff(substack1, substack2, x, y):
 def find_optimal_crop(substack1, substack2):
     expansions = 0
     step = 10
-    start_range = 40
+    start_range = 30
     x_start, y_start, x_end, y_end = -start_range, -start_range, start_range, start_range
 
     
@@ -344,13 +343,8 @@ def align_all_sessions(m,r, session_order, partial=None):
         align_sessions(m, r, start_img_id, suff, session_order, partial)
         print("-------------------------------------")
 
-#%%
-#done:[1,2], [101,1], [10,1], [2,1], [102,1], [6,2], [12,1], [3,1], [9,2], [109,1],[103,1], [112,2]!
-#todo:
-#bad: [13,1], [14,1] (rotacja) [8,1] (skok) [5,1], [15,1],  [9,1] xy
-#ret ok: [10,1], [103,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1]
-# [109,1] - wieksze okna
-group_session_order = ["ret1", "ret2", "ret3"]
-regs = [[109,1],  [9,2]]#, [109,1], [102,1]]
+
+group_session_order = ["s1", "s2", "s3"]
+
 for m,r in regs:
     align_all_sessions(m,r,group_session_order, partial=None)

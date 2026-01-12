@@ -76,4 +76,4 @@ ALIGNMENT_FNAMES = {'thresh' : "m{0}s{2}_r{1}_spots",
 'raw' : "m{0}s{2}_r{1}"}
 
 
-STACK_WINDOW = 16
+STACK_WINDOW = 13

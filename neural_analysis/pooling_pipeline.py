@@ -38,7 +38,7 @@ pooled_cells_fname = config["filenames"]["pooled_cells"]
 regions = [[13,2],[14,1], [16, 1], [8,1], [20,2], [2,2], [5,1], [10,1], [11,1]]
 regions = [[1,2], [3,2],[4,1], [7,2], [9,1],[12,1], [17,1], [18,2]]
 #%%[112,2],
-regions = [[10,1], [103,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1]]
+regions = [[7,2], [13,1], [11,1], [106,1]]
 
 #%% reading  and prepping detection results from icy
 

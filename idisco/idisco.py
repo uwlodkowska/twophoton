@@ -3,11 +3,19 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 
-ctx_idx = [1,5,7,8,10,14,16,20,21]
+ctx_idx = [1,5,8,10,14,16,20,21,7]
 landmark_idx = [2,3,4,6,11,12,13,17,22]
+altern_mice = [3,5,8,12]
+ld_mice = [1,4,6,11]
 mouse2group = ({m: "ctx" for m in ctx_idx}
                | {m: "landmark" for m in landmark_idx})
-cells_dir = Path("/mnt/data/idisco/all_cells/")   # adjust to folder with all cell CSVs
+
+
+mouse2group_c = ({m: "alt" for m in altern_mice}
+               | {m: "ld" for m in ld_mice})
+cells_dir = "/mnt/data/idisco/all_cells/conflict/conflict/"
+
+cells_dir = "/mnt/data/idisco/all_cells/"
 atlas_file = "/mnt/data/idisco/all_cells/ABA_brain_regions.csv"
 
 voxel_um = 25.0
@@ -215,8 +223,8 @@ vols = vols[["region_id", "volume_mu", "acr_atl"]]
 all_counts = []
 L=lev
 
-for m in ctx_idx + landmark_idx:
-    f = f"/mnt/data/idisco/all_cells/cells_{m}.csv"
+for m in landmark_idx+ctx_idx:
+    f = f"{cells_dir}cells_{m}.csv"
     
     base = count_cells_for_mouse(f, m, vols, L)
     
@@ -255,8 +263,8 @@ counts_group = counts_group.loc[~olfactory_mask].copy()
 
 
 #%%only include spatial memory circuit
-mask = counts_group[f'level{lev}_id'].isin(list(spatial5_ids) + list(spatial4_ids))
-counts_group = counts_group.loc[mask].copy()
+spatial_mask = counts_group[f'level{lev}_id'].isin(list(spatial5_ids) + list(spatial4_ids))
+counts_group = counts_group.loc[spatial_mask].copy()
 
 
 #%% remove zero volume  and calculate density
@@ -329,11 +337,11 @@ def run_permanova(counts, L=5, value_col="density_per_mm3",
 #%%
 counts_group = counts_group.loc[counts_group["volume_mu"]>0].copy()
 print(counts_group.head())
-#counts_clean = counts_group[counts_group["mouse"]!=7]
-res = run_permanova(counts_group, L=lev, value_col="density_per_mu",
+counts_clean = counts_group[counts_group["mouse"]!=7]
+res = run_permanova(counts_clean, L=lev, value_col="density_per_mu",
                     ctx_idx=ctx_idx, landmark_idx=landmark_idx,
                     metric="euclidean", normalize="hellinger",
-                    permutations=10000, seed=1)
+                    permutations=1000, seed=0)
 
 print(res)
 
@@ -353,7 +361,7 @@ def plot_dispersion_box(permdisp_distances_df, title="Odległość od centroidu 
         fig = ax.figure
 
     groups = [g for g,_ in d.groupby("group")]
-    glabels = {"ctx": "kontekst", "landmark": "landmark"}
+    glabels = {"ctx": "kontekst", "landmark": "landmark", "ld": "landmark", "alt":"alternacja"}
     data = [d.loc[d["group"]==g, "dist_to_centroid"].to_numpy() for g in groups]
     ax.boxplot(data, labels=[glabels[str(g)] for g in groups])
     ax.tick_params(axis='both', which='minor', labelsize=16)
@@ -367,7 +375,7 @@ def distances_to_centroid(dm, groups):
     labels = groups.rename(index=str).reindex(dm.ids).to_numpy()
     d = []
     for g in np.unique(labels):
-        mask = labels == g
+        mask = (labels == g)
         cg = coords[mask].mean(axis=0)
         for sid, dist in zip(np.array(dm.ids)[mask], np.linalg.norm(coords[mask]-cg, axis=1)):
             d.append({"sample": sid, "group": g, "dist_to_centroid": float(dist)})
@@ -423,7 +431,7 @@ def plot_pcoa_scatter(dm, groups, ids = [0,1], title="PCoA (axes 1–2)", ax=Non
     # axis labels with variance explained
     vx = coords.proportion_explained
 
-    glabels = {"ctx": "kontekst", "landmark": "landmark"}
+    glabels = {"ctx": "kontekst", "landmark": "landmark", "ld" :"landmark", "alt" : "alternating"}
     ax.set_xlabel(f"PCoA{ids[0]+1} ({vx.iloc[ids[0]]*100:.1f}%)", fontsize=16)
     ax.set_ylabel(f"PCoA{ids[1]+1} ({vx.iloc[ids[1]]*100:.1f}%)", fontsize=16)
     ax.set_title(title, fontsize=18)
@@ -494,7 +502,7 @@ def make_dm_from_counts(counts: pd.DataFrame,
 
 
 #%%
-#counts_clean = counts_group[counts_group["mouse"]!=7]
+counts_clean = counts_group[counts_group["mouse"]!=7]
 dm, groups, keep_cols = make_dm_from_counts(counts_group, L=lev,
                                             value_col="density_per_mu",
                                             normalize="hellinger",
@@ -533,7 +541,7 @@ def plot_pcoa_plus_dispersion(dm, groups, ids=[1,2],
 
     return fig, (ax0, ax1)
 
-fig, (ax0, ax1) = plot_pcoa_plus_dispersion(dm, groups, ids=[0,1])
+fig, (ax0, ax1) = plot_pcoa_plus_dispersion(dm, groups, ids=[0,2])
 
 
 #%%
@@ -711,7 +719,7 @@ def loo_permanova(dm: DistanceMatrix, meta: pd.DataFrame, column="group",
     return full, pd.DataFrame(rows).sort_values("p_loo")
 
 def outlier_diagnostics(counts, L=5, value_col="density_per_mm3",
-                        normalize="hellinger", metric="braycurtis",
+                        normalize="hellinger", metric="euclidean",
                         permutations=999, seed=42):
     """
     Runs:
@@ -723,7 +731,7 @@ def outlier_diagnostics(counts, L=5, value_col="density_per_mm3",
     wide, groups = _wide_and_groups(counts, L=L, value_col=value_col, normalize=normalize)
 
     # keep only ctx/landmark; maintain index alignment
-    mask = groups.isin(["ctx", "landmark"])
+    mask = groups.isin(["ctx", "landmark", "alt", "ld"])
     wide   = wide.loc[mask]
     groups = groups.loc[mask]
 
@@ -770,7 +778,7 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
 #%%
 
 import numpy as np, pandas as pd
-from scipy.stats import ttest_ind
+from scipy.stats import ttest_ind, wilcoxon, mannwhitneyu, shapiro
 from statsmodels.stats.multitest import multipletests
 
 def build_wide(counts, L=5, value_col="density_per_mm3"):
@@ -787,36 +795,49 @@ def clr_transform(X, eps=1e-6):
     P = X.div(X.sum(axis=1), axis=0)
     Z = np.log(P + eps)
     return Z.sub(Z.mean(axis=1), axis=0)
+def welch_df(a, b):
+    n1, n2 = len(a), len(b)
+    s1, s2 = np.var(a, ddof=1), np.var(b, ddof=1)
+    num = (s1/n1 + s2/n2)**2
+    den = (s1**2 / (n1**2 * (n1-1))) + (s2**2 / (n2**2 * (n2-1)))
+    return num/den
 
+def per_region_raw_mouse_t(counts, L=5, value_col="density_per_mu"):
+    X = build_wide(counts, L=L, value_col=value_col)
+    X_clr = X.copy()
 
-def per_region_log(counts, L):
-    
-    d = counts.copy()
-    d['log_density'] = np.log(d["density_per_mu"])
-    
-    out = []
-    for roi, sub in d.groupby(f'level{L}_id'):
-        gA = sub.loc[sub.group=='landmark','log_density'].to_numpy()
-        gB = sub.loc[sub.group=='ctx','log_density'].to_numpy()
-        if len(gA)>=2 and len(gB)>=2:
-            t, p = ttest_ind(gA, gB, equal_var=False)  # Welch
-            # Hedges' g
-            na, nb = len(gA), len(gB)
-            sa2, sb2 = gA.var(ddof=1), gB.var(ddof=1)
-            sp = np.sqrt(((na-1)*sa2 + (nb-1)*sb2) / (na+nb-2))
-            d_unb = (gA.mean() - gB.mean()) / (sp + 1e-12)
-            J = 1 - 3/(4*(na+nb)-9)  # small-sample correction
-            g_hedges = J * d_unb
-            out.append((roi, t, p, g_hedges, gA.mean()-gB.mean()))
-    out = pd.DataFrame(out, columns=[f'level{L}_id','t','p','hedges_g','diff_logdens'])
-    
-    out['p_adj'] = multipletests(out['p'], method='fdr_bh')[1]
-    
-    out['region'] = out[f'level{L}_id'].astype('Int64')
+    groups = (counts[["mouse","group"]].drop_duplicates()
+                .set_index("mouse").reindex(X_clr.index)["group"])
 
-    labels = atlas[['id','name','acronym']].rename(columns={'id':'region'})
-    log_labeled = out.merge(labels, on='region', how='left')
-    return log_labeled[["region","acronym","name"] + [c for c in log_labeled.columns if c!="region"]].sort_values("p")
+    # A = X_clr.loc[groups.eq("alt")]
+    # B = X_clr.loc[groups.eq("ld")]
+    A = X_clr.loc[groups.eq("landmark")]
+    B = X_clr.loc[groups.eq("ctx")]
+    shapiro_count=0
+    rows = []
+    for reg in X_clr.columns:
+        a_idx = A[reg].dropna().index
+        b_idx = B[reg].dropna().index
+        a, b = A.loc[a_idx, reg], B.loc[b_idx, reg]
+        w_df = welch_df(a,b)
+        p_sw1 = shapiro(a).pvalue
+        p_sw2 = shapiro(b).pvalue
+        # if (p_sw1>0.05) or (p_sw2>0.05):
+        #     shapiro_count +=1
+        #     t, p = mannwhitneyu(a, b, alternative="two-sided", method="auto")
+        # else:
+        t, p = ttest_ind(a, b, equal_var=False)
+        # simple effect size on CLR scale (Hedges g approx; small-n correction optional)
+        sd_pooled = np.sqrt((a.var(ddof=1)+b.var(ddof=1))/2)
+        g = (a.mean() - b.mean()) / (sd_pooled if sd_pooled>0 else np.nan)
+        rows.append({"region": reg, "t": t, "p": p, "g_clr": g, "wdf":w_df,
+                     "mean_ctx_raw":  X.loc[b_idx, reg].mean(),
+                     "mean_landmark_raw": X.loc[a_idx, reg].mean(),
+                     "diff_clr": a.mean()-b.mean()})  # landmark − ctx
+    print("not normal ", shapiro_count)
+    out = pd.DataFrame(rows)
+    out["q"] = multipletests(out["p"], method="fdr_bh")[1]
+    return out.sort_values("p")
 
 
 def per_region_welch_t(counts, L=5, value_col="density_per_mu"):
@@ -826,30 +847,47 @@ def per_region_welch_t(counts, L=5, value_col="density_per_mu"):
     groups = (counts[["mouse","group"]].drop_duplicates()
                 .set_index("mouse").reindex(X_clr.index)["group"])
 
-    A = X_clr.loc[groups.eq("ctx")]
-    B = X_clr.loc[groups.eq("landmark")]
-
+    # A = X_clr.loc[groups.eq("alt")]
+    # B = X_clr.loc[groups.eq("ld")]
+    A = X_clr.loc[groups.eq("landmark")]
+    B = X_clr.loc[groups.eq("ctx")]
+    shapiro_count=0
     rows = []
     for reg in X_clr.columns:
-        a, b = A[reg].dropna(), B[reg].dropna()
+        a_idx = A[reg].dropna().index
+        b_idx = B[reg].dropna().index
+        a, b = A.loc[a_idx, reg], B.loc[b_idx, reg]
+        w_df = welch_df(a,b)
+        p_sw1 = shapiro(a).pvalue
+        p_sw2 = shapiro(b).pvalue
+        # if (p_sw1>0.05) or (p_sw2>0.05):
+        #     shapiro_count +=1
+        #     t, p = mannwhitneyu(a, b, alternative="two-sided", method="auto")
+        # else:
         t, p = ttest_ind(a, b, equal_var=False)
         # simple effect size on CLR scale (Hedges g approx; small-n correction optional)
         sd_pooled = np.sqrt((a.var(ddof=1)+b.var(ddof=1))/2)
         g = (a.mean() - b.mean()) / (sd_pooled if sd_pooled>0 else np.nan)
-        rows.append({"region": reg, "t": t, "p": p, "g_clr": g,
-                     "mean_ctx": a.mean(), "mean_landmark": b.mean()})
+        rows.append({"region": reg, "t": t, "p": p, "g_clr": g, "wdf":w_df,
+                     "mean_ctx_raw":  X.loc[b_idx, reg].mean(),
+                     "mean_landmark_raw": X.loc[a_idx, reg].mean(),
+                     "diff_clr": a.mean()-b.mean()})  # landmark − ctx
+    print("not normal ", shapiro_count)
     out = pd.DataFrame(rows)
     out["q"] = multipletests(out["p"], method="fdr_bh")[1]
     return out.sort_values("p")
 #%% ttests
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-    tt = per_region_welch_t(counts_group, L=lev,value_col="count")
+    tt = per_region_welch_t(counts_clean, L=lev,value_col="density_per_mu")
     tt_labeled = (tt.assign(region=tt["region"].astype("Int64"))
                 .merge(atlas.rename(columns={"id":"region"}), on="region", how="left"))
     print(tt_labeled[["region","acronym","name"] + [c for c in tt.columns if c!="region"]].head(20))
     
-    ll = per_region_log(counts_group, L=lev)
-    print(ll.head(20))
+    ll = per_region_raw_mouse_t(counts_clean, L=lev)
+    
+    ll_labeled = (ll.assign(region=ll["region"].astype("Int64"))
+                .merge(atlas.rename(columns={"id":"region"}), on="region", how="left"))
+    print(ll_labeled[["region","acronym","name"] + [c for c in ll.columns if c!="region"]].head(20))
 
 #%%
 
@@ -887,9 +925,11 @@ def spearman_regionwise(counts, behav_df, y_col, L=5, value_col="density_per_mu"
         rows.append({"region": reg, "rho": rho, "p": p})
     out = pd.DataFrame(rows)
     out["q"] = multipletests(out["p"], method="fdr_bh")[1]
-    return out.sort_values("q")
+    return out.sort_values("p")
 
 #%%
+clean_gr = counts_group[landmark_mask]
+
 mode = "hellinger"#"rel"#"clr", 
 res_test = spearman_regionwise(counts_group, p_df, "test_score", L=lev, mode=mode)
 res_gap  = spearman_regionwise(counts_group, p_df, "gap_lmk_ctx", L=lev, mode=mode)
@@ -913,9 +953,250 @@ res_training_len_labeled = add_acronym_by_id(res_training_len, atlas, id_col="re
 
 
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-    print(res_test_labeled.head(15))
-    print(res_gap_labeled.head(15))
-    print(res_training_len_labeled.head(15))
+    print(res_test_labeled.head(20))
+    #print(res_gap_labeled.head(20))
+    print(res_training_len_labeled.head(20))
+
+
+
+#%%
+landmark_mask = counts_group["mouse"].isin(landmark_idx)
+ctx_mask = counts_group["mouse"].isin(ctx_idx)
+
+#%%
+
+import numpy as np, pandas as pd
+
+from sklearn.metrics import fowlkes_mallows_score
+from scipy.spatial.distance import squareform
+from scipy.cluster.hierarchy import linkage, dendrogram, cophenet, fcluster
+def _get_dendro(df, L, roi_cols=None):
+    # same as your find_modularity, but returns (Z, cols, Y) and can restrict to roi_cols
+    wide = (df.pivot_table(index="mouse",
+                           columns=f"level{L}_id",
+                           values="density_per_mu",
+                           aggfunc="sum",
+                           fill_value=0)
+              .sort_index())
+    wide = wide.loc[:, (wide > 0).any(axis=0)]
+    Xz = wide.sub(wide.mean(axis=1), axis=0).div(wide.std(axis=1), axis=0).fillna(0)
+    keep = Xz.var(axis=0, ddof=1) > 0
+    Xz = Xz.loc[:, keep]
+    if roi_cols is not None:
+        Xz = Xz[[c for c in Xz.columns if c in set(roi_cols)]]
+        keep2 = Xz.var(axis=0, ddof=1) > 0
+        Xz = Xz.loc[:, keep2]
+
+    C = Xz.corr(method="spearman").values
+    D = 1 - C
+    np.fill_diagonal(D, 0.0)
+    Y = squareform(D, checks=False)
+    Z = linkage(Y, method="average")
+    return Z, Xz.columns.tolist(), Y
+
+#%%
+
+spatial = counts_group[spatial_mask]
+acr_map = dict(zip(vols["region_id"].astype(int), vols["acr_atl"].astype(str)))
+name_map = dict(zip(atlas["id"].astype(int), atlas["name"].astype(str)))
+# --- build per-group trees
+Z_ctx, cols_ctx, Y_ctx = _get_dendro(spatial[ctx_mask], 6)
+Z_lmk, cols_lmk, Y_lmk = _get_dendro(spatial[landmark_mask], 6)
+
+# (optional) plot them as-is
+fig, axs = plt.subplots(1,2, figsize=(12,4), constrained_layout=True)
+dendrogram(Z_ctx, labels=[acr_map.get(int(c), str(c)) for c in cols_ctx], leaf_rotation=90, ax=axs[0]); axs[0].set_title("ctx")
+dendrogram(Z_lmk, labels=[acr_map.get(int(c), str(c)) for c in cols_lmk], leaf_rotation=90, ax=axs[1]); axs[1].set_title("landmark")
+
+# --- compare on the SAME ROI set (column intersection)
+common = sorted(set(cols_ctx) & set(cols_lmk))
+Zc_ctx, cols_common, Yc_ctx = _get_dendro(spatial[ctx_mask], 6, roi_cols=common)
+Zc_lmk, _,           Yc_lmk = _get_dendro(spatial[landmark_mask], 6, roi_cols=common)
+
+# cophenetic correlation
+_, c1 = cophenet(Zc_ctx, Yc_ctx)
+_, c2 = cophenet(Zc_lmk, Yc_lmk)
+r_coph = float(np.corrcoef(c1, c2)[0,1])
+print("Cophenetic correlation (common ROIs):", r_coph)
+
+# Bk curve (Fowlkes–Mallows) across cuts
+Ks, Bk = [], []
+max_k = min(len(common), 30)
+for k in range(2, max_k+1):
+    cl1 = fcluster(Zc_ctx, k, criterion="maxclust")
+    cl2 = fcluster(Zc_lmk, k, criterion="maxclust")
+    Ks.append(k); Bk.append(fowlkes_mallows_score(cl1, cl2))
+
+plt.figure(figsize=(5,3))
+plt.plot(Ks, Bk, marker="o"); plt.xlabel("k (maxclust)"); plt.ylabel("Fowlkes–Mallows (Bk)")
+plt.title("Tree similarity across cuts"); plt.tight_layout()
+
+#%%
+import numpy as np, pandas as pd
+from scipy.cluster.hierarchy import linkage, cophenet, fcluster
+from scipy.spatial.distance import squareform
+from sklearn.metrics import fowlkes_mallows_score
+import random
+
+def _get_dendro(df, L, roi_cols=None):
+    wide = (df.pivot_table(index="mouse",
+                           columns=f"level{L}_id",
+                           values="density_per_mu",
+                           aggfunc="sum",
+                           fill_value=0)
+              .sort_index())
+    wide = wide.loc[:, (wide > 0).any(axis=0)]
+    Xz = wide.sub(wide.mean(axis=1), axis=0).div(wide.std(axis=1), axis=0).fillna(0)
+    keep = Xz.var(axis=0, ddof=1) > 0
+    Xz = Xz.loc[:, keep]
+    if roi_cols is not None:
+        Xz = Xz[[c for c in Xz.columns if c in set(roi_cols)]]
+        # drop any columns that became constant after restriction
+        keep2 = Xz.var(axis=0, ddof=1) > 0
+        Xz = Xz.loc[:, keep2]
+
+    C = Xz.corr(method="spearman").values
+    D = 1 - C
+    np.fill_diagonal(D, 0.0)
+    Y = squareform(D, checks=False)
+    Z = linkage(Y, method="average")
+    return Z, Xz.columns.tolist(), Y
+
+def _tree_stats(Z1, Y1, Z2, Y2, max_k):
+    # Cophenetic correlation
+    _, c1 = cophenet(Z1, Y1)
+    _, c2 = cophenet(Z2, Y2)
+    r_coph = float(np.corrcoef(c1, c2)[0,1])
+
+    # Mean Bk across cuts (higher = more similar)
+    from scipy.cluster.hierarchy import fcluster
+    Ks = range(2, max_k+1)
+    bks = []
+    for k in Ks:
+        cl1 = fcluster(Z1, k, criterion="maxclust")
+        cl2 = fcluster(Z2, k, criterion="maxclust")
+        bks.append(fowlkes_mallows_score(cl1, cl2))
+    return r_coph, float(np.mean(bks))
+
+def dendro_perm_test(df, L, group_col="group",
+                     g1="ctx", g2="landmark",
+                     n_perm=1000, seed=0):
+    rng = random.Random(seed)
+
+    # observed groups
+    df1 = df[df[group_col]==g1]
+    df2 = df[df[group_col]==g2]
+
+    # build observed trees
+    Z1, cols1, Y1 = _get_dendro(df1, L)
+    Z2, cols2, Y2 = _get_dendro(df2, L)
+
+    # lock ROI set to the intersection of observed trees
+    common = sorted(set(cols1) & set(cols2))
+    Z1c, _, Y1c = _get_dendro(df1, L, roi_cols=common)
+    Z2c, _, Y2c = _get_dendro(df2, L, roi_cols=common)
+    max_k = min(len(common), 30)
+    r_obs, bk_obs = _tree_stats(Z1c, Y1c, Z2c, Y2c, max_k=max_k)
+
+    # prepare permutation: shuffle mouse labels across the two groups (preserve sizes)
+    mice = df["mouse"].drop_duplicates().tolist()
+    mice_g1 = df1["mouse"].drop_duplicates().tolist()
+    n1 = len(mice_g1)
+
+    r_perm, bk_perm = [], []
+    for _ in range(n_perm):
+        # permute group labels across mice
+        perm = mice[:]  # copy
+        rng.shuffle(perm)
+        g1_mice = set(perm[:n1])
+        mask1 = df["mouse"].isin(g1_mice)
+        mask2 = ~mask1 & df["mouse"].isin(mice)
+
+        # build trees on the same common ROI set
+        try:
+            Zp1, _, Yp1 = _get_dendro(df[mask1], L, roi_cols=common)
+            Zp2, _, Yp2 = _get_dendro(df[mask2], L, roi_cols=common)
+            r, bk = _tree_stats(Zp1, Yp1, Zp2, Yp2, max_k=max_k)
+            r_perm.append(r); bk_perm.append(bk)
+        except Exception:
+            # if a perm creates degenerate variance in the locked ROI set, skip it
+            continue
+
+    r_perm = np.array(r_perm); bk_perm = np.array(bk_perm)
+
+    # One-sided p-values for "trees are more dissimilar than expected":
+    # (lower r_coph and lower mean Bk imply more difference)
+    p_r  = (1 + np.sum(r_perm <= r_obs)) / (1 + len(r_perm))
+    p_bk = (1 + np.sum(bk_perm <= bk_obs)) / (1 + len(bk_perm))
+
+    return {
+        "common_rois": common,
+        "r_coph_obs": r_obs, "p_r_one_sided": p_r,
+        "bk_mean_obs": bk_obs, "p_bk_one_sided": p_bk,
+        "r_perm": r_perm, "bk_perm": bk_perm,
+        "n_perm_effective": len(r_perm)
+    }
+#%%
+# Example:
+res = dendro_perm_test(counts_group, L=6, g1="ctx", g2="landmark", n_perm=2000, seed=42)
+print(res["r_coph_obs"], res["p_r_one_sided"], res["bk_mean_obs"], res["p_bk_one_sided"])
+
+
+#%%
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr
+
+def plot_scatter_region(counts, behav_df, y_col, region, *,
+                        L=5, value_col="density_per_mu",
+                        mode="rel", control_group=True, ax=None):
+    # --- same X construction as in spearman_regionwise ---
+    X = build_wide(counts, L=L, value_col=value_col)
+    if mode == "rel":
+        X = X.div(X.sum(axis=1).replace(0,np.nan), axis=0).fillna(0)
+    elif mode == "hellinger":
+        X = np.sqrt(X.div(X.sum(axis=1).replace(0,np.nan), axis=0).fillna(0))
+    elif mode == "clr":
+        X = clr_transform(X)
+
+    y = behav_df.set_index("mouse")[y_col].reindex(X.index)
+
+    if control_group:
+        g = (counts[["mouse","group"]].drop_duplicates()
+               .set_index("mouse").reindex(X.index)["group"].astype("category"))
+        G = pd.get_dummies(g, drop_first=True)
+        G_ = np.c_[np.ones(len(G)), G.values]              # intercept + group
+        P  = G_ @ np.linalg.pinv(G_.T @ G_) @ G_.T         # hat matrix
+        X  = X - (P @ X.values)                            # residualize X
+        y  = y - pd.Series(P @ y.to_numpy(), index=y.index) # residualize y
+
+    x = pd.Series(X[region], index=X.index)
+    d = pd.DataFrame({"x": x, "y": y}).dropna()
+
+    rho, p = spearmanr(d["x"], d["y"], nan_policy="omit")
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4,3.2))
+    ax.scatter(d["x"], d["y"], s=24, alpha=0.9)
+    # light linear fit just for a visual guide
+    if len(d) >= 2:
+        m, b = np.polyfit(d["x"], d["y"], 1)
+        xs = np.linspace(d["x"].min(), d["x"].max(), 100)
+        ax.plot(xs, m*xs + b, linewidth=1)
+
+    ax.set_xlabel(f"{region} ({mode})")
+    ax.set_ylabel(y_col)
+    ax.set_title(f"{region}: Spearman ρ={rho:.2f}, p={p:.3g}")
+    return ax
+#%%
+plot_scatter_region(counts_group, p_df, y_col="training_len", region=692,
+                    L=6, value_col="density_per_mu", mode="rel", control_group=True)
+plt.tight_layout()
+plt.show()
+
+
 
 
 #%%

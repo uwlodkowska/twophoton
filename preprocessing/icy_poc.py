@@ -38,5 +38,3 @@ result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 print("STDOUT:\n", result.stdout)
 print("STDERR:\n", result.stderr)
-
-#java -jar icy.jar -hl -x plugins.adufour.protocols.Protocols protocol=/home/ula/twophoton/twophoton/icy_protocols/post_alignment_segmentation.protocol

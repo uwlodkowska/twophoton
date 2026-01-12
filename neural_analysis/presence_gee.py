@@ -23,7 +23,7 @@ import presence_plots as pp
 SESSIONS, all_mice = utils.get_concatenated_df_from_config("config_files/context_only.yaml", idx=0)
 
 #%%
-all_mice.columns
+all_mice.groupby("mouse").size().sum()
 #%%
 
 

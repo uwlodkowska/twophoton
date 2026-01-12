@@ -7,8 +7,8 @@ experiment:
   result_path: "/mnt/data/fos_gfp_tmaze/results/context_only/"
   background_dir: "/mnt/data/fos_gfp_tmaze/results/context_only/background.csv"
   session_order: [["s1", "s2", "s3"],[ "ret1", "ret2", "ret3"]]
-  regions: [[[10,1], [103,1], [109,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1], [9,2]],
-  [[10,1], [103,1], [102,1],[101,1],[1,2], [2,1], [6,2], [12,1], [3,1]]]
+  regions: [[[103,1,"M"], [109,1, "M"], [102,1, "M"], [2,1, "M"], [6,2, "M"], [3,1,"M"], [106,1, "M"],[11,1, "M"], [13,1, "M"], [7,2, "F"]],#, [[9,2]],[10,1], [12,1],[1,2],[101,1],[101,1]
+  [[103,1,"x"], [102,1,"x"],[1,2,"x"], [2,1,"x"], [6,2,"x"],[3,1,"x"]]]#[10,1], [12,1],[101,1]
 
 behavior:
   behav_dir: "/media/ula/DATADRIVE1/fos_gfp_tmaze/context_only/behav/Tmaze_2p_landmark_ctx.xlsx"
@@ -18,7 +18,7 @@ filenames:
   img_fn_template: "m{0}{2}_r{1}.tif"
   watershed_img_fn_template: "m{0}{2}_r{1}_watershed.tif"
   cell_data_opt_template: "m{}_r{}_{}_output_optimized.txt"
-  pooled_cells: "m{}ret_r{}_pooled.csv"
+  pooled_cells: "m{}ret_r{}_pooled.csv"#"m{}_r{}_pooled.csv"#
 
 alignment_filenames:
   thresh: "m{}_r{}_{}_spots"

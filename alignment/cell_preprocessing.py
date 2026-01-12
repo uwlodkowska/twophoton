@@ -330,7 +330,7 @@ def intensity_depth_detrend(
     z_col: str = ICY_COLNAMES['zcol'],
     frac: float = 0.3,        # LOWESS span
     bin_width: float = 5.0,   # depth-bin width (same units as z_col)
-    use_log1p: bool = True,
+    use_log1p: bool = False,
     eps: float = 1e-9,
     intensity_prefix: str = "int_optimized_",
     background_prefix: str = "background_",
@@ -401,8 +401,10 @@ def intensity_depth_detrend(
             SI = np.log1p(SI)
             SB = np.log1p(SB)
 
-        muI = _lowess(SI, z); residI = SI - muI
-        muB = _lowess(SB, z); residB = SB - muB
+        muI = _lowess(SI, z); 
+        residI = SI - muI
+        muB = _lowess(SB, z); 
+        residB = SB - muB
 
         # per-bin scales
         sigma_I = _robust_scale(residI)  # intensity MAD
@@ -414,6 +416,7 @@ def intensity_depth_detrend(
         bg_only_z = residB / sigma_B.values  # diagnostics
 
         out[f"{Icol}_rstd"] = int_z
+        
         out[f"{Icol}_bgz"]  = bg_z
         out[f"{Bcol}_rstd"]  = bg_only_z
 
@@ -429,6 +432,145 @@ def intensity_depth_detrend(
 
 
     return out
+
+
+
+
+def intensity_depth_detrend_pooled_mad(
+    df: pd.DataFrame,
+    session_ids,
+    z_col: str = ICY_COLNAMES['zcol'],
+    frac: float = 0.3,        # LOWESS span
+    bin_width: float = 5.0,   # depth-bin width (same units as z_col)
+    use_log1p: bool = False,
+    eps: float = 1e-9,
+    intensity_prefix: str = "int_optimized_",
+    background_prefix: str = "background_",
+    k_dim: float = 4.0,       # “mean − k·MAD of background residual” threshold (kept as in your code)
+) -> pd.DataFrame:
+    """
+    Single-mouse version.
+    For each session:
+      - Build SI = intensity - background; SB = background.
+      - Optional log1p.
+      - LOWESS detrend both vs depth (per session).
+    Then (pooled across sessions, per depth bin):
+      - sigma_I = 1.4826 * MAD(resid_I) about the pooled median of resid_I
+      - sigma_B = 1.4826 * MAD(resid_B) about the pooled median of resid_B
+    Finally (per session):
+      - int_z     = resid_I / sigma_I      (common per-bin scale)
+      - bg_z      = resid_I / sigma_B
+      - bg_only_z = resid_B / sigma_B
+    """
+    out = df.copy()
+
+    # Depth bins for this mouse
+    z = pd.to_numeric(out[z_col], errors="coerce").astype(float).values
+    z_min, z_max = np.nanmin(z), np.nanmax(z)
+    edges = np.arange(np.floor(z_min), np.ceil(z_max) + bin_width, bin_width)
+    z_bin = pd.cut(z, bins=edges, right=False, include_lowest=True, labels=False)
+
+    def _lowess(y, x):
+        order = np.argsort(x)
+        xs, ys = x[order], y[order]
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        trend_s = np.full_like(ys, np.nan, dtype=float)
+        if ok.any():
+            trend_s[ok] = lowess(ys[ok], xs[ok], frac=frac, it=2, return_sorted=False)
+        trend = np.full_like(y, np.nan, dtype=float)
+        finite = np.isfinite(xs) & np.isfinite(trend_s)
+        if finite.sum() >= 2:
+            trend[:] = np.interp(x, xs[finite], trend_s[finite])
+        return trend
+
+    # 1) Residuals per session (LOWESS is per session)
+    residI_by_sid = {}
+    residB_by_sid = {}
+
+    for sid in session_ids:
+        Icol = f"{intensity_prefix}{sid}"
+        Bcol = f"{background_prefix}{sid}"
+        if Icol not in out.columns or Bcol not in out.columns:
+            continue
+
+        I = pd.to_numeric(out[Icol], errors="coerce").values
+        B = pd.to_numeric(out[Bcol], errors="coerce").values
+
+        SI = I - B
+        SB = B
+
+        if use_log1p:
+            SI = np.log1p(SI)
+            SB = np.log1p(SB)
+
+        muI = _lowess(SI, z)
+        muB = _lowess(SB, z)
+
+        residI_by_sid[sid] = SI - muI
+        residB_by_sid[sid] = SB - muB
+
+        # (kept) optional dim-by-background flag (original threshold style)
+        bg_mean = out.groupby(z_bin)[Bcol].transform("mean")
+        bg_std  = out.groupby(z_bin)[Bcol].transform("std")
+        threshold = bg_mean + 3.0 * bg_std
+        out[f"is_dim_by_bg_{sid}"] = (out[Icol] < threshold)
+
+    # 2) Pooled per-bin scales (MAD after LOWESS, pooled across sessions)
+    if residI_by_sid:
+        present_sids = [sid for sid in session_ids if sid in residI_by_sid]
+
+        pool_I = pd.DataFrame({
+            "z_bin": np.repeat(z_bin, len(present_sids)),
+            "resid": np.concatenate([residI_by_sid[s] for s in present_sids])
+        })
+        pool_B = pd.DataFrame({
+            "z_bin": np.repeat(z_bin, len(present_sids)),
+            "resid": np.concatenate([residB_by_sid[s] for s in present_sids])
+        })
+
+        med_I_by_bin = pool_I.groupby("z_bin")["resid"].median()
+        med_B_by_bin = pool_B.groupby("z_bin")["resid"].median()
+
+        sig_I_by_bin = pool_I.groupby("z_bin")["resid"].apply(
+            lambda r: 1.4826 * np.nanmedian(np.abs(r - med_I_by_bin.loc[r.name]))
+        )
+        sig_B_by_bin = pool_B.groupby("z_bin")["resid"].apply(
+            lambda r: 1.4826 * np.nanmedian(np.abs(r - med_B_by_bin.loc[r.name]))
+        )
+
+        sigma_I = pd.Series(z_bin).map(sig_I_by_bin).astype(float).replace(0.0, eps).values
+        sigma_B = pd.Series(z_bin).map(sig_B_by_bin).astype(float).replace(0.0, eps).values
+
+        # 3) Standardize per session with the pooled scales; write outputs
+        for sid in present_sids:
+            Icol = f"{intensity_prefix}{sid}"
+            Bcol = f"{background_prefix}{sid}"
+
+            int_z     = residI_by_sid[sid] / sigma_I
+            bg_z      = residI_by_sid[sid] / sigma_B
+            bg_only_z = residB_by_sid[sid] / sigma_B
+
+            out[f"{Icol}_rstd_common"] = int_z
+            out[f"{Icol}_resid"] = residI_by_sid[sid]
+            #out[f"{Icol}_bgz"]  = bg_z
+            #out[f"{Bcol}_rstd"] = bg_only_z
+
+    return out
+
+
+
+
+
+def _winsor_per_mouse(df, col, mouse_col="mouse", lo=0.5, hi=99.5):
+    qlo, qhi = lo/100.0, hi/100.0
+
+    def _clip(s: pd.Series) -> pd.Series:
+        v = s.dropna()
+        if v.empty:                
+            return s               
+        lo_v, hi_v = v.quantile([qlo, qhi])
+        return s.clip(lower=lo_v, upper=hi_v)
+    return df.groupby(mouse_col)[col].transform(_clip)
 
 def classify_by_rstd(df, id_pairs, tau=0.9):
     res = df.copy()
